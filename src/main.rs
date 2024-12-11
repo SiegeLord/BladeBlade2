@@ -79,10 +79,8 @@ fn real_main() -> Result<()>
 
 	let mut quit = false;
 
-	let mut cur_screen = Screen::Menu(menu::Menu::new(&mut state)?);
-	//let mut cur_screen = Screen::Game(game::Game::new(
-	//	&mut state,
-	//)?);
+	//let mut cur_screen = Screen::Menu(menu::Menu::new(&mut state)?);
+	let mut cur_screen = Screen::Game(game::Game::new(&mut state)?);
 
 	let mut logics_without_draw = 0;
 	let mut old_fullscreen = state.options.fullscreen;
@@ -187,7 +185,7 @@ fn real_main() -> Result<()>
 
 			if frame_count == 120
 			{
-				println!("FPS: {:.2}", 120. / (frame_start - prev_frame_start));
+				//println!("FPS: {:.2}", 120. / (frame_start - prev_frame_start));
 				prev_frame_start = frame_start;
 				frame_count = 0;
 			}

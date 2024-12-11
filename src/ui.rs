@@ -831,16 +831,16 @@ impl MainMenu
 	{
 		self.widgets.draw(state);
 
-		let sprite = "data/title.cfg";
-		let sprite = state
-			.get_sprite(sprite)
-			.expect(&format!("Could not find sprite: {}", sprite));
-		sprite.draw(
-			Point2::new(state.buffer_width() / 2., state.buffer_height() / 2. - 125.),
-			0,
-			Color::from_rgb_f(1., 1., 1.),
-			state,
-		);
+		//let sprite = "data/title.cfg";
+		//let sprite = state
+		//	.get_sprite(sprite)
+		//	.expect(&format!("Could not find sprite: {}", sprite));
+		//sprite.draw(
+		//	Point2::new(state.buffer_width() / 2., state.buffer_height() / 2. - 125.),
+		//	0,
+		//	Color::from_rgb_f(1., 1., 1.),
+		//	state,
+		//);
 		let lh = state.ui_font().get_line_height() as f32;
 		state.core.draw_text(
 			state.ui_font(),

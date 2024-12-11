@@ -208,8 +208,8 @@ impl GameState
 		let buffer_height;
 		if FIXED_BUFFER
 		{
-			buffer_width = 640;
-			buffer_height = 480;
+			buffer_width = 320;
+			buffer_height = 240;
 		}
 		else
 		{

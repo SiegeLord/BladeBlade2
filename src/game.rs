@@ -22,6 +22,8 @@ impl Game
 {
 	pub fn new(state: &mut game_state::GameState) -> Result<Self>
 	{
+		state.cache_sprite("data/player_anim.cfg")?;
+
 		Ok(Self {
 			map: Map::new(state)?,
 			subscreens: ui::SubScreens::new(state),
@@ -132,13 +134,31 @@ impl Game
 
 pub fn spawn_obj(pos: Point2<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
 {
-	let entity = world.spawn((comps::Position::new(pos),));
+	let entity = world.spawn((
+		comps::Drawable::new("data/player_anim.cfg"),
+		comps::Position::new(pos),
+		comps::Velocity {
+			pos: Vector2::new(0., 0.),
+		},
+	));
 	Ok(entity)
+}
+
+fn vec_to_dir_name(vec: Vector2<f32>) -> &'static str
+{
+	match (vec.x > 0., vec.y > 0., vec.x.abs() > vec.y.abs())
+	{
+		(true, _, true) => "Right",
+		(false, _, true) => "Left",
+		(_, true, false) => "Down",
+		(_, false, false) => "Up",
+	}
 }
 
 struct Map
 {
 	world: hecs::World,
+	player: hecs::Entity,
 }
 
 impl Map
@@ -146,9 +166,12 @@ impl Map
 	fn new(_state: &mut game_state::GameState) -> Result<Self>
 	{
 		let mut world = hecs::World::new();
-		spawn_obj(Point2::new(100., 100.), &mut world)?;
+		let player = spawn_obj(Point2::new(100., 100.), &mut world)?;
 
-		Ok(Self { world: world })
+		Ok(Self {
+			world: world,
+			player: player,
+		})
 	}
 
 	fn logic(&mut self, state: &mut game_state::GameState)
@@ -163,23 +186,56 @@ impl Map
 		}
 
 		// Input.
-		if state.controls.get_action_state(controls::Action::Move) > 0.5
+		// if state.controls.get_action_state(controls::Action::Move) > 0.5
+		// {
+		// 	for (_, position) in self.world.query::<&mut comps::Position>().iter()
+		// 	{
+		// 		position.pos.y += 100. * DT;
+		// 	}
+		// }
+		let mouse_pos = state.mouse_pos;
+		for (_, (position, velocity)) in self
+			.world
+			.query::<(&mut comps::Position, &mut comps::Velocity)>()
+			.iter()
 		{
-			for (_, position) in self.world.query::<&mut comps::Position>().iter()
+			let diff = mouse_pos.cast::<f32>() - position.pos;
+			let norm_diff = diff.normalize();
+			if diff.norm() < 100.
 			{
-				position.pos.y += 100. * DT;
+				velocity.pos = Vector2::new(0., 0.);
+			}
+			else
+			{
+				velocity.pos = 200. * norm_diff;
+			}
+			position.dir = norm_diff.y.atan2(norm_diff.x);
+		}
+
+		// Drawable animation selection.
+		for (_, (drawable, position, velocity)) in self
+			.world
+			.query::<(&mut comps::Drawable, &comps::Position, &comps::Velocity)>()
+			.iter()
+		{
+			if velocity.pos.norm() > 0.
+			{
+				drawable.animation_name = format!("Move{}", vec_to_dir_name(velocity.pos));
+			}
+			else
+			{
+				let dir = Vector2::new(position.dir.cos(), position.dir.sin());
+				drawable.animation_name = format!("Stand{}", vec_to_dir_name(dir));
 			}
 		}
 
 		// Movement.
-		for (_, position) in self.world.query::<&mut comps::Position>().iter()
+		for (_, (position, velocity)) in self
+			.world
+			.query::<(&mut comps::Position, &comps::Velocity)>()
+			.iter()
 		{
-			position.pos.x += 1500. * DT;
-			if position.pos.x > state.buffer_width()
-			{
-				position.pos.x %= state.buffer_width();
-				position.snapshot();
-			}
+			position.pos += DT * velocity.pos;
 		}
 
 		// Remove dead entities
@@ -203,16 +259,21 @@ impl Map
 
 	fn draw(&mut self, state: &game_state::GameState) -> Result<()>
 	{
-		state.core.clear_to_color(Color::from_rgb_f(0., 0.0, 0.5));
+		state.core.clear_to_color(Color::from_rgb_f(0., 0.0, 0.1));
 
-		// Blob
-		for (_, position) in self.world.query::<&comps::Position>().iter()
+		// Drawable
+		for (_, (drawable, position)) in self
+			.world
+			.query::<(&comps::Drawable, &comps::Position)>()
+			.iter()
 		{
-			state.prim.draw_filled_circle(
-				position.draw_pos(state.alpha).x,
-				position.draw_pos(state.alpha).y,
-				16.,
-				Color::from_rgb_f(1.0, 0.0, 1.0),
+			let sprite = state.get_sprite(&drawable.sprite)?;
+			sprite.draw(
+				position.draw_pos(state.alpha),
+				&drawable.animation_name,
+				state.time() - drawable.animation_start,
+				drawable.animation_speed,
+				&state,
 			);
 		}
 

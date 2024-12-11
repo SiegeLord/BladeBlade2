@@ -24,7 +24,7 @@ impl Menu
 		state.paused = false;
 		state.sfx.cache_sample("data/ui1.ogg")?;
 		state.sfx.cache_sample("data/ui2.ogg")?;
-		state.cache_sprite("data/title.cfg")?;
+		//state.cache_sprite("data/title.cfg")?;
 
 		let mut subscreens = ui::SubScreens::new(state);
 		subscreens.push(ui::SubScreen::MainMenu(ui::MainMenu::new(state)));
