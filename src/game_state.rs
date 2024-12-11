@@ -131,7 +131,7 @@ impl GameState
 	pub fn new() -> Result<Self>
 	{
 		let core = Core::init()?;
-		core.set_app_name("HackInit");
+		core.set_app_name("BladeBlade2");
 		core.set_org_name("SiegeLord");
 
 		let options = load_options(&core)?;
