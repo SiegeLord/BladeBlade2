@@ -20,3 +20,11 @@ I really don't want to do 3 different monster types.
 But also don't want to have a weird interaction with the chests or w/e.
 
 Maybe like... the fonts collect enemy souls, and you can break open the chest to collect loot, and add to the counter of the other two (draining the current counter). Limit changed by level? Rampage just makes things faster.
+
+
+Ok, concretely:
+
+- Colored chests + mobs
+- Kill mobs, add temp charges to chest
+- Open chest, add temp charges to other colors
+- More charges, more reward + enemeies
