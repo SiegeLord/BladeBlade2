@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::{atlas, game_state, utils};
+use crate::{atlas, game_state, utils, palette};
 use allegro::*;
 use na::Point2;
 use nalgebra as na;
@@ -14,6 +14,11 @@ struct AnimationDesc
 	frame_ms: Vec<f64>,
 }
 
+fn default_false() -> bool
+{
+	false
+}
+
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 struct SpriteDesc
 {
@@ -21,6 +26,7 @@ struct SpriteDesc
 	width: i32,
 	height: i32,
 	animations: HashMap<String, AnimationDesc>,
+	palettes: Vec<String>
 }
 
 struct Animation
@@ -37,11 +43,22 @@ pub struct Sprite
 
 impl Sprite
 {
-	pub fn load(filename: &str, core: &Core, atlas: &mut atlas::Atlas) -> Result<Self>
+	pub fn load(filename: &str, core: &Core, atlas: &mut atlas::Atlas, palettes: &mut palette::PaletteList) -> Result<Self>
 	{
 		let mut desc: SpriteDesc = utils::load_config(filename)?;
 
-		let bitmap = utils::load_bitmap(&core, &desc.bitmap)?;
+		let bitmap = if !desc.palettes.is_empty()
+		{
+			for palette_name in &desc.palettes
+			{
+				palettes.add_palette(&core, palette_name)?;
+			}
+			utils::load_bitmap_indexed(&core, &desc.bitmap)?
+		}
+		else
+		{
+			utils::load_bitmap(&core, &desc.bitmap)?
+		};
 
 		let num_frames_y = bitmap.get_height() / desc.height;
 		let num_frames_x = bitmap.get_width() / desc.width;
@@ -105,6 +122,11 @@ impl Sprite
 			desc: desc,
 			animations: animations,
 		})
+	}
+
+	pub fn get_palettes(&self) -> &[String]
+	{
+		&self.desc.palettes
 	}
 
 	pub fn draw(

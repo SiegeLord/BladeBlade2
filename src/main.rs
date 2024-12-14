@@ -11,6 +11,7 @@ mod error;
 mod game;
 mod game_state;
 mod menu;
+mod palette;
 mod sfx;
 mod sprite;
 mod ui;
@@ -56,6 +57,7 @@ fn real_main() -> Result<()>
 	let shader = utils::load_shader(&mut display, "data/basic")?;
 	let scale_shader = utils::load_shader(&mut display, "data/scale")?;
 	state.resize_display(&display)?;
+	state.palette_shader = utils::load_shader(&mut display, "data/palette")?;
 
 	let timer = Timer::new(&state.core, utils::DT as f64)
 		.map_err(|_| "Couldn't create timer".to_string())?;

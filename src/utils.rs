@@ -155,6 +155,11 @@ pub fn load_bitmap(core: &Core, file: &str) -> Result<Bitmap>
 	Ok(Bitmap::load(&core, file).map_err(|_| format!("Couldn't load {}", file))?)
 }
 
+pub fn load_bitmap_indexed(core: &Core, file: &str) -> Result<Bitmap>
+{
+	Ok(Bitmap::load_indexed(&core, file).map_err(|_| format!("Couldn't load {}", file))?)
+}
+
 pub fn load_sample(audio: &AudioAddon, path: &str) -> Result<Sample>
 {
 	Ok(Sample::load(audio, path).map_err(|_| format!("Couldn't load '{}'", path))?)

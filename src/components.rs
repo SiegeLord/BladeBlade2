@@ -43,6 +43,7 @@ pub struct Velocity
 pub struct Drawable
 {
 	pub sprite: String,
+	pub palette: Option<String>,
 	pub animation_name: String,
 	pub animation_start: f64,
 	pub animation_speed: f32,
@@ -54,6 +55,7 @@ impl Drawable
 	{
 		Self {
 			sprite: sprite.into(),
+			palette: None,
 			animation_name: "Default".to_string(),
 			animation_start: 0.,
 			animation_speed: 1.,

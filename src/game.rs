@@ -167,6 +167,8 @@ impl Map
 	{
 		let mut world = hecs::World::new();
 		let player = spawn_obj(Point2::new(100., 100.), &mut world)?;
+		let enemy = spawn_obj(Point2::new(200., 100.), &mut world)?;
+		world.get::<&mut comps::Drawable>(enemy).unwrap().palette = Some("data/player_pal2.png".to_string());
 
 		Ok(Self {
 			world: world,
@@ -208,6 +210,7 @@ impl Map
 			else
 			{
 				velocity.pos = 200. * norm_diff;
+				velocity.pos.x = 0.;
 			}
 			position.dir = norm_diff.y.atan2(norm_diff.x);
 		}
@@ -259,7 +262,11 @@ impl Map
 
 	fn draw(&mut self, state: &game_state::GameState) -> Result<()>
 	{
-		state.core.clear_to_color(Color::from_rgb_f(0., 0.0, 0.1));
+		state.core.clear_to_color(Color::from_rgb_f(0.3, 0.3, 0.3));
+		state
+			.core
+			.use_shader(Some(&*state.palette_shader.upgrade().unwrap()))
+			.unwrap();
 
 		// Drawable
 		for (_, (drawable, position)) in self
@@ -268,6 +275,17 @@ impl Map
 			.iter()
 		{
 			let sprite = state.get_sprite(&drawable.sprite)?;
+			let palette_index = state.palettes.get_palette_index(drawable.palette.as_ref().unwrap_or(&sprite.get_palettes()[0]))?;
+
+			state
+				.core
+				.set_shader_uniform("palette_index", &[palette_index as f32][..])
+				.ok();
+			state
+				.core
+				.set_shader_sampler("palette", &state.palettes.palette_bitmap, 2)
+				.ok();
+
 			sprite.draw(
 				position.draw_pos(state.alpha),
 				&drawable.animation_name,

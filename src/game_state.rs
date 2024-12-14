@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::{atlas, controls, sfx, sprite, utils};
+use crate::{atlas, controls, palette, sfx, sprite, utils};
 use allegro::*;
 use allegro_font::*;
 use allegro_image::*;
@@ -9,7 +9,7 @@ use nalgebra::Point2;
 use serde_derive::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::{fmt, path};
+use std::{fmt, path, sync};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -87,6 +87,9 @@ pub struct GameState
 	pub buffer1: Option<Bitmap>,
 	pub buffer2: Option<Bitmap>,
 
+	pub palette_shader: sync::Weak<Shader>,
+	pub palettes: palette::PaletteList,
+
 	pub alpha: f32,
 }
 
@@ -148,6 +151,8 @@ impl GameState
 		//sfx.set_music_file("data/lemonade-sinus.xm");
 		//sfx.play_music()?;
 
+		let palettes = palette::PaletteList::new(&core);
+
 		let controls = controls::ControlsHandler::new(options.controls.clone());
 		Ok(Self {
 			options: options,
@@ -171,6 +176,8 @@ impl GameState
 			controls: controls,
 			track_mouse: true,
 			mouse_pos: Point2::new(0, 0),
+			palette_shader: Default::default(),
+			palettes: palettes,
 			alpha: 0.,
 		})
 	}
@@ -263,7 +270,7 @@ impl GameState
 		Ok(match self.sprites.entry(name.to_string())
 		{
 			Entry::Occupied(o) => o.into_mut(),
-			Entry::Vacant(v) => v.insert(sprite::Sprite::load(name, &self.core, &mut self.atlas)?),
+			Entry::Vacant(v) => v.insert(sprite::Sprite::load(name, &self.core, &mut self.atlas, &mut self.palettes)?),
 		})
 	}
 
