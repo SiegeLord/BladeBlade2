@@ -277,9 +277,9 @@ impl Map
 		}
 
 		// Input.
-		if let Ok((position, acceleration)) = self
+		if let Ok(acceleration) = self
 			.world
-			.query_one_mut::<(&mut comps::Position, &mut comps::Acceleration)>(self.player)
+			.query_one_mut::<&mut comps::Acceleration>(self.player)
 		{
 			let dx = state.controls.get_action_state(controls::Action::MoveRight)
 				- state.controls.get_action_state(controls::Action::MoveLeft);
