@@ -87,6 +87,7 @@ pub struct GameState
 	pub buffer1: Option<Bitmap>,
 	pub buffer2: Option<Bitmap>,
 
+	pub basic_shader: sync::Weak<Shader>,
 	pub palette_shader: sync::Weak<Shader>,
 	pub palettes: palette::PaletteList,
 
@@ -177,6 +178,7 @@ impl GameState
 			track_mouse: true,
 			mouse_pos: Point2::new(0, 0),
 			palette_shader: Default::default(),
+			basic_shader: Default::default(),
 			palettes: palettes,
 			alpha: 0.,
 		})

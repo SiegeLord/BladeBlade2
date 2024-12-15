@@ -54,8 +54,8 @@ fn real_main() -> Result<()>
 	let mut display = Display::new(&state.core, state.options.width, state.options.height)
 		.map_err(|_| "Couldn't create display".to_string())?;
 
-	let shader = utils::load_shader(&mut display, "data/basic")?;
 	let scale_shader = utils::load_shader(&mut display, "data/scale")?;
+	state.basic_shader = utils::load_shader(&mut display, "data/basic")?;
 	state.resize_display(&display)?;
 	state.palette_shader = utils::load_shader(&mut display, "data/palette")?;
 
@@ -89,7 +89,7 @@ fn real_main() -> Result<()>
 	let mut old_ui_scale = state.options.ui_scale;
 	let mut old_frac_scale = state.options.frac_scale;
 
-	let mut prev_frame_start = state.core.get_time();
+	let prev_frame_start = state.core.get_time();
 	let mut logic_end = prev_frame_start;
 	let mut frame_count = 0;
 	if state.options.grab_mouse
@@ -137,7 +137,7 @@ fn real_main() -> Result<()>
 
 			state
 				.core
-				.use_shader(Some(&*shader.upgrade().unwrap()))
+				.use_shader(Some(&*state.basic_shader.upgrade().unwrap()))
 				.unwrap();
 
 			state
@@ -188,7 +188,7 @@ fn real_main() -> Result<()>
 			if frame_count == 120
 			{
 				//println!("FPS: {:.2}", 120. / (frame_start - prev_frame_start));
-				prev_frame_start = frame_start;
+				//prev_frame_start = frame_start;
 				frame_count = 0;
 			}
 			frame_count += 1;

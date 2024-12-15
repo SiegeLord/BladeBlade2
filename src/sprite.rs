@@ -25,7 +25,9 @@ struct SpriteDesc
 	bitmap: String,
 	width: i32,
 	height: i32,
+	#[serde(default)]
 	animations: HashMap<String, AnimationDesc>,
+	#[serde(default)]
 	palettes: Vec<String>
 }
 
@@ -134,8 +136,6 @@ impl Sprite
 		state: &game_state::GameState,
 	)
 	{
-		let w = self.desc.width as f32;
-		let h = self.desc.height as f32;
 		// Awkward to do the lookup twice?
 		let animation = &self.animations[animation_name];
 		let animation_desc = &self.desc.animations[animation_name];
@@ -153,7 +153,17 @@ impl Sprite
 			}
 			cur_time += dt;
 		}
-		let atlas_bmp = &animation.frames[frame_idx];
+
+		self.draw_frame(pos, animation_name, frame_idx as i32, state)
+	}
+
+	pub fn draw_frame(&self, pos: Point2<f32>, animation_name: &str, frame_idx: i32, state: &game_state::GameState)
+    {
+		let w = self.desc.width as f32;
+		let h = self.desc.height as f32;
+		// Awkward to do the lookup three times!!!!?
+		let animation = &self.animations[animation_name];
+		let atlas_bmp = &animation.frames[frame_idx as usize];
 
 		state.core.draw_bitmap_region(
 			&state.atlas.pages[atlas_bmp.page].bitmap,

@@ -9,8 +9,12 @@ use na::{
 };
 use nalgebra as na;
 use rand::prelude::*;
+use tiled;
 
 use std::collections::HashMap;
+use std::path::Path;
+
+const TILE_SIZE: i32 = 32;
 
 pub struct Game
 {
@@ -155,25 +159,106 @@ fn vec_to_dir_name(vec: Vector2<f32>) -> &'static str
 	}
 }
 
+struct MapChunk
+{
+	tiles: Vec<i32>,
+	width: i32,
+	height: i32,
+}
+
+impl MapChunk
+{
+	pub fn new(filename: &str) -> Result<Self>
+	{
+		let map = tiled::Loader::new().load_tmx_map(&Path::new(&filename))?;
+		let layer_tiles = match map.get_layer(0).unwrap().layer_type()
+		{
+			tiled::LayerType::Tiles(layer_tiles) => layer_tiles,
+			_ => return Err("Layer 0 must be the tile layer!".to_string().into()),
+		};
+
+		let height = layer_tiles.height().unwrap() as usize;
+		let width = layer_tiles.width().unwrap() as usize;
+
+		let mut tiles = Vec::with_capacity(width * height);
+
+		for y in 0..height
+		{
+			for x in 0..width
+			{
+				let id = layer_tiles.get_tile(x as i32, y as i32).unwrap().id();
+				tiles.push(id as i32);
+			}
+		}
+
+		Ok(Self {
+			tiles: tiles,
+			width: width as i32,
+			height: height as i32,
+		})
+	}
+
+	pub fn draw(&self, state: &game_state::GameState) -> Result<()>
+	{
+		let sprite = state.get_sprite("data/terrain.cfg")?;
+		for y in 0..self.height
+		{
+			for x in 0..self.width
+			{
+				let tile_size = TILE_SIZE as f32;
+				let tile_idx = self.tiles[y as usize * self.height as usize + x as usize];
+				sprite.draw_frame(
+					Point2::new(x as f32 * tile_size, y as f32 * tile_size),
+					"Default",
+					tile_idx,
+					state,
+				);
+			}
+		}
+		Ok(())
+	}
+}
+
 struct Map
 {
 	world: hecs::World,
 	player: hecs::Entity,
+	chunks: Vec<MapChunk>,
+	camera_pos: Point2<f32>,
 }
 
 impl Map
 {
-	fn new(_state: &mut game_state::GameState) -> Result<Self>
+	fn new(state: &mut game_state::GameState) -> Result<Self>
 	{
 		let mut world = hecs::World::new();
-		let player = spawn_obj(Point2::new(100., 100.), &mut world)?;
-		let enemy = spawn_obj(Point2::new(200., 100.), &mut world)?;
-		world.get::<&mut comps::Drawable>(enemy).unwrap().palette = Some("data/player_pal2.png".to_string());
+
+		let spawn_pos = Point2::new(100., 100.);
+
+		let player = spawn_obj(spawn_pos, &mut world)?;
+
+		state.cache_sprite("data/terrain.cfg")?;
 
 		Ok(Self {
 			world: world,
 			player: player,
+			chunks: vec![MapChunk::new("data/test.tmx")?],
+			camera_pos: spawn_pos,
 		})
+	}
+
+	fn camera_to_world(&self, pos: Point2<f32>, state: &game_state::GameState) -> Point2<f32>
+	{
+		self.camera_pos + pos.coords
+			- Vector2::new(state.buffer_width() / 2., state.buffer_height() / 2.)
+	}
+
+	fn camera_transform(&self, state: &game_state::GameState) -> Transform
+	{
+		let mut transform = Transform::identity();
+		transform.translate(-self.camera_pos.x, -self.camera_pos.y);
+		transform.translate(state.buffer_width() / 2., state.buffer_height() / 2.);
+		transform
 	}
 
 	fn logic(&mut self, state: &mut game_state::GameState)
@@ -201,7 +286,7 @@ impl Map
 			.query::<(&mut comps::Position, &mut comps::Velocity)>()
 			.iter()
 		{
-			let diff = mouse_pos.cast::<f32>() - position.pos;
+			let diff = self.camera_to_world(mouse_pos.cast::<f32>(), state) - position.pos;
 			let norm_diff = diff.normalize();
 			if diff.norm() < 100.
 			{
@@ -210,7 +295,6 @@ impl Map
 			else
 			{
 				velocity.pos = 200. * norm_diff;
-				velocity.pos.x = 0.;
 			}
 			position.dir = norm_diff.y.atan2(norm_diff.x);
 		}
@@ -263,6 +347,23 @@ impl Map
 	fn draw(&mut self, state: &game_state::GameState) -> Result<()>
 	{
 		state.core.clear_to_color(Color::from_rgb_f(0.3, 0.3, 0.3));
+
+		if let Ok(pos) = self.world.get::<&comps::Position>(self.player)
+		{
+			self.camera_pos = utils::round_point(pos.draw_pos(state.alpha));
+		}
+		state.core.use_transform(&self.camera_transform(state));
+
+		state
+			.core
+			.use_shader(Some(&*state.basic_shader.upgrade().unwrap()))
+			.unwrap();
+
+		for chunk in self.chunks.iter_mut()
+		{
+			chunk.draw(state)?;
+		}
+
 		state
 			.core
 			.use_shader(Some(&*state.palette_shader.upgrade().unwrap()))
@@ -275,7 +376,12 @@ impl Map
 			.iter()
 		{
 			let sprite = state.get_sprite(&drawable.sprite)?;
-			let palette_index = state.palettes.get_palette_index(drawable.palette.as_ref().unwrap_or(&sprite.get_palettes()[0]))?;
+			let palette_index = state.palettes.get_palette_index(
+				drawable
+					.palette
+					.as_ref()
+					.unwrap_or(&sprite.get_palettes()[0]),
+			)?;
 
 			state
 				.core
