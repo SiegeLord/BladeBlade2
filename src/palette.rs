@@ -60,14 +60,18 @@ impl PaletteList
 			al_unlock_bitmap(self.palette_bitmap.get_allegro_bitmap());
 		}
 
-		self.palette_registry.insert(filename.to_string(), self.num_palettes);
-        self.num_palettes += 1;
+		self.palette_registry
+			.insert(filename.to_string(), self.num_palettes);
+		self.num_palettes += 1;
 
 		Ok(())
 	}
 
 	pub fn get_palette_index(&self, filename: &str) -> Result<i32>
-    {
-        self.palette_registry.get(filename).map(|&v| v).ok_or(format!("Couldn't find palette {}", filename).into())
-    }
+	{
+		self.palette_registry
+			.get(filename)
+			.map(|&v| v)
+			.ok_or(format!("Couldn't find palette {}", filename).into())
+	}
 }

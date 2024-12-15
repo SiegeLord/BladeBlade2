@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::{atlas, game_state, utils, palette};
+use crate::{atlas, game_state, palette, utils};
 use allegro::*;
 use na::Point2;
 use nalgebra as na;
@@ -28,7 +28,7 @@ struct SpriteDesc
 	#[serde(default)]
 	animations: HashMap<String, AnimationDesc>,
 	#[serde(default)]
-	palettes: Vec<String>
+	palettes: Vec<String>,
 }
 
 struct Animation
@@ -45,7 +45,9 @@ pub struct Sprite
 
 impl Sprite
 {
-	pub fn load(filename: &str, core: &Core, atlas: &mut atlas::Atlas, palettes: &mut palette::PaletteList) -> Result<Self>
+	pub fn load(
+		filename: &str, core: &Core, atlas: &mut atlas::Atlas, palettes: &mut palette::PaletteList,
+	) -> Result<Self>
 	{
 		let mut desc: SpriteDesc = utils::load_config(filename)?;
 
@@ -157,8 +159,11 @@ impl Sprite
 		self.draw_frame(pos, animation_name, frame_idx as i32, state)
 	}
 
-	pub fn draw_frame(&self, pos: Point2<f32>, animation_name: &str, frame_idx: i32, state: &game_state::GameState)
-    {
+	pub fn draw_frame(
+		&self, pos: Point2<f32>, animation_name: &str, frame_idx: i32,
+		state: &game_state::GameState,
+	)
+	{
 		let w = self.desc.width as f32;
 		let h = self.desc.height as f32;
 		// Awkward to do the lookup three times!!!!?

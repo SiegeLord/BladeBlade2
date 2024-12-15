@@ -8,7 +8,10 @@ use crate::utils;
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Copy, Clone, Debug, PartialOrd, Ord)]
 pub enum Action
 {
-	Move,
+	MoveLeft,
+	MoveRight,
+	MoveUp,
+	MoveDown,
 }
 
 impl Action
@@ -17,7 +20,10 @@ impl Action
 	{
 		match self
 		{
-			Action::Move => "Move",
+			Action::MoveLeft => "MoveLeft",
+			Action::MoveRight => "MoveRight",
+			Action::MoveUp => "MoveUp",
+			Action::MoveDown => "MoveDown",
 		}
 	}
 }
@@ -478,8 +484,20 @@ impl Controls
 	{
 		let mut action_to_inputs = BTreeMap::new();
 		action_to_inputs.insert(
-			Action::Move,
-			[Some(Input::Keyboard(allegro::KeyCode::Space)), None],
+			Action::MoveUp,
+			[Some(Input::Keyboard(allegro::KeyCode::W)), None],
+		);
+		action_to_inputs.insert(
+			Action::MoveLeft,
+			[Some(Input::Keyboard(allegro::KeyCode::A)), None],
+		);
+		action_to_inputs.insert(
+			Action::MoveRight,
+			[Some(Input::Keyboard(allegro::KeyCode::D)), None],
+		);
+		action_to_inputs.insert(
+			Action::MoveDown,
+			[Some(Input::Keyboard(allegro::KeyCode::S)), None],
 		);
 
 		Self {

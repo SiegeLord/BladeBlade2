@@ -1,3 +1,4 @@
+use crate::components::Velocity;
 use crate::error::Result;
 use crate::utils::DT;
 use crate::{astar, components as comps, controls, game_state, sprite, ui, utils};
@@ -144,6 +145,9 @@ pub fn spawn_obj(pos: Point2<f32>, world: &mut hecs::World) -> Result<hecs::Enti
 		comps::Velocity {
 			pos: Vector2::new(0., 0.),
 		},
+		comps::Acceleration {
+			pos: Vector2::new(0., 0.),
+		},
 	));
 	Ok(entity)
 }
@@ -273,41 +277,27 @@ impl Map
 		}
 
 		// Input.
-		// if state.controls.get_action_state(controls::Action::Move) > 0.5
-		// {
-		// 	for (_, position) in self.world.query::<&mut comps::Position>().iter()
-		// 	{
-		// 		position.pos.y += 100. * DT;
-		// 	}
-		// }
-		let mouse_pos = state.mouse_pos;
-		for (_, (position, velocity)) in self
+		if let Ok((position, acceleration)) = self
 			.world
-			.query::<(&mut comps::Position, &mut comps::Velocity)>()
-			.iter()
+			.query_one_mut::<(&mut comps::Position, &mut comps::Acceleration)>(self.player)
 		{
-			let diff = self.camera_to_world(mouse_pos.cast::<f32>(), state) - position.pos;
-			let norm_diff = diff.normalize();
-			if diff.norm() < 100.
-			{
-				velocity.pos = Vector2::new(0., 0.);
-			}
-			else
-			{
-				velocity.pos = 200. * norm_diff;
-			}
-			position.dir = norm_diff.y.atan2(norm_diff.x);
+			let dx = state.controls.get_action_state(controls::Action::MoveRight)
+				- state.controls.get_action_state(controls::Action::MoveLeft);
+			let dy = state.controls.get_action_state(controls::Action::MoveDown)
+				- state.controls.get_action_state(controls::Action::MoveUp);
+
+			acceleration.pos = Vector2::new(dx, dy) * 512.;
 		}
 
 		// Drawable animation selection.
-		for (_, (drawable, position, velocity)) in self
+		for (_, (drawable, position, acceleration)) in self
 			.world
-			.query::<(&mut comps::Drawable, &comps::Position, &comps::Velocity)>()
+			.query::<(&mut comps::Drawable, &comps::Position, &comps::Acceleration)>()
 			.iter()
 		{
-			if velocity.pos.norm() > 0.
+			if acceleration.pos.norm() > 0.
 			{
-				drawable.animation_name = format!("Move{}", vec_to_dir_name(velocity.pos));
+				drawable.animation_name = format!("Move{}", vec_to_dir_name(acceleration.pos));
 			}
 			else
 			{
@@ -317,12 +307,59 @@ impl Map
 		}
 
 		// Movement.
+		for (_, (acceleration, velocity)) in self
+			.world
+			.query::<(&mut comps::Acceleration, &mut comps::Velocity)>()
+			.iter()
+		{
+			let decel = 512.;
+			let max_vel = 128.;
+			if velocity.pos.x.abs() > 0. && acceleration.pos.x == 0.
+			{
+				if velocity.pos.x.abs() <= decel * DT
+				{
+					velocity.pos.x = 0.
+				}
+				else
+				{
+					acceleration.pos.x = -velocity.pos.x.signum() * decel;
+				}
+			}
+			if velocity.pos.y.abs() > 0. && acceleration.pos.y == 0.
+			{
+				if velocity.pos.y.abs() <= decel * DT
+				{
+					velocity.pos.y = 0.
+				}
+				else
+				{
+					acceleration.pos.y = -velocity.pos.y.signum() * decel;
+				}
+			}
+			if velocity.pos.norm() > max_vel
+			{
+				velocity.pos = velocity.pos.normalize() * max_vel;
+			}
+		}
+
+		for (_, (velocity, acceleration)) in self
+			.world
+			.query::<(&mut comps::Velocity, &comps::Acceleration)>()
+			.iter()
+		{
+			velocity.pos += DT * acceleration.pos;
+		}
+
 		for (_, (position, velocity)) in self
 			.world
 			.query::<(&mut comps::Position, &comps::Velocity)>()
 			.iter()
 		{
 			position.pos += DT * velocity.pos;
+			if velocity.pos.norm() > 0.
+			{
+				position.dir = velocity.pos.y.atan2(velocity.pos.x);
+			}
 		}
 
 		// Remove dead entities
@@ -393,7 +430,7 @@ impl Map
 				.ok();
 
 			sprite.draw(
-				position.draw_pos(state.alpha),
+				utils::round_point(position.draw_pos(state.alpha)),
 				&drawable.animation_name,
 				state.time() - drawable.animation_start,
 				drawable.animation_speed,

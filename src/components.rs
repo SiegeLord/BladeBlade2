@@ -40,6 +40,12 @@ pub struct Velocity
 	pub pos: Vector2<f32>,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct Acceleration
+{
+	pub pos: Vector2<f32>,
+}
+
 pub struct Drawable
 {
 	pub sprite: String,

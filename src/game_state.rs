@@ -272,7 +272,12 @@ impl GameState
 		Ok(match self.sprites.entry(name.to_string())
 		{
 			Entry::Occupied(o) => o.into_mut(),
-			Entry::Vacant(v) => v.insert(sprite::Sprite::load(name, &self.core, &mut self.atlas, &mut self.palettes)?),
+			Entry::Vacant(v) => v.insert(sprite::Sprite::load(
+				name,
+				&self.core,
+				&mut self.atlas,
+				&mut self.palettes,
+			)?),
 		})
 	}
 
