@@ -1,7 +1,7 @@
 use crate::components::Velocity;
 use crate::error::Result;
 use crate::utils::DT;
-use crate::{astar, components as comps, controls, game_state, sprite, ui, utils};
+use crate::{astar, components as comps, controls, game_state, spatial_grid, sprite, ui, utils};
 use allegro::*;
 use allegro_font::*;
 use na::{
@@ -15,7 +15,7 @@ use tiled;
 use std::collections::HashMap;
 use std::path::Path;
 
-const TILE_SIZE: i32 = 32;
+const TILE_SIZE: f32 = 32.;
 
 pub struct Game
 {
@@ -28,6 +28,7 @@ impl Game
 	pub fn new(state: &mut game_state::GameState) -> Result<Self>
 	{
 		state.cache_sprite("data/player_anim.cfg")?;
+		state.cache_sprite("data/shadow.cfg")?;
 
 		Ok(Self {
 			map: Map::new(state)?,
@@ -148,6 +149,11 @@ pub fn spawn_obj(pos: Point2<f32>, world: &mut hecs::World) -> Result<hecs::Enti
 		comps::Acceleration {
 			pos: Vector2::new(0., 0.),
 		},
+		comps::Solid {
+			size: 8.,
+			mass: 1.,
+			collision_class: comps::CollisionClass::Big,
+		},
 	));
 	Ok(entity)
 }
@@ -163,6 +169,13 @@ fn vec_to_dir_name(vec: Vector2<f32>) -> &'static str
 	}
 }
 
+#[derive(Debug, Copy, Clone)]
+struct GridInner
+{
+	id: hecs::Entity,
+	pos: Point2<f32>,
+}
+
 struct MapChunk
 {
 	tiles: Vec<i32>,
@@ -172,7 +185,7 @@ struct MapChunk
 
 impl MapChunk
 {
-	pub fn new(filename: &str) -> Result<Self>
+	fn new(filename: &str) -> Result<Self>
 	{
 		let map = tiled::Loader::new().load_tmx_map(&Path::new(&filename))?;
 		let layer_tiles = match map.get_layer(0).unwrap().layer_type()
@@ -202,17 +215,16 @@ impl MapChunk
 		})
 	}
 
-	pub fn draw(&self, state: &game_state::GameState) -> Result<()>
+	fn draw(&self, state: &game_state::GameState) -> Result<()>
 	{
 		let sprite = state.get_sprite("data/terrain.cfg")?;
 		for y in 0..self.height
 		{
 			for x in 0..self.width
 			{
-				let tile_size = TILE_SIZE as f32;
 				let tile_idx = self.tiles[y as usize * self.height as usize + x as usize];
 				sprite.draw_frame(
-					Point2::new(x as f32 * tile_size, y as f32 * tile_size),
+					Point2::new(x as f32 * TILE_SIZE, y as f32 * TILE_SIZE),
 					"Default",
 					tile_idx,
 					state,
@@ -240,6 +252,19 @@ impl Map
 		let spawn_pos = Point2::new(100., 100.);
 
 		let player = spawn_obj(spawn_pos, &mut world)?;
+
+		for i in 0..3
+		{
+			for j in 0..3
+			{
+				let entity = spawn_obj(
+					Point2::new(200. + i as f32 * 32., 200. + j as f32 * 32.),
+					&mut world,
+				)?;
+				world.get::<&mut comps::Drawable>(entity)?.palette =
+					Some("data/player_pal2.png".to_string());
+			}
+		}
 
 		state.cache_sprite("data/terrain.cfg")?;
 
@@ -286,7 +311,7 @@ impl Map
 			let dy = state.controls.get_action_state(controls::Action::MoveDown)
 				- state.controls.get_action_state(controls::Action::MoveUp);
 
-			acceleration.pos = Vector2::new(dx, dy) * 512.;
+			acceleration.pos = Vector2::new(dx, dy) * 1024.;
 		}
 
 		// Drawable animation selection.
@@ -312,8 +337,8 @@ impl Map
 			.query::<(&mut comps::Acceleration, &mut comps::Velocity)>()
 			.iter()
 		{
-			let decel = 512.;
-			let max_vel = 128.;
+			let decel = 1024.;
+			let max_vel = 196.;
 			if velocity.pos.x.abs() > 0. && acceleration.pos.x == 0.
 			{
 				if velocity.pos.x.abs() <= decel * DT
@@ -362,6 +387,79 @@ impl Map
 			}
 		}
 
+		// Collision detection
+		let mut grid = spatial_grid::SpatialGrid::new(
+			self.chunks[0].width as usize,
+			self.chunks[0].height as usize,
+			TILE_SIZE,
+			TILE_SIZE,
+		);
+
+		for (id, (position, solid)) in self.world.query_mut::<(&comps::Position, &comps::Solid)>()
+		{
+			let margin = 8.;
+			let r = solid.size + margin;
+			let x = position.pos.x;
+			let y = position.pos.y;
+			grid.push(spatial_grid::entry(
+				Point2::new(x - r, y - r),
+				Point2::new(x + r, y + r),
+				GridInner {
+					pos: position.pos,
+					id: id,
+				},
+			));
+		}
+
+		let mut colliding_pairs = vec![];
+		for (a, b) in grid.all_pairs(|a, b| {
+			let a_solid = self.world.get::<&comps::Solid>(a.inner.id).unwrap();
+			let b_solid = self.world.get::<&comps::Solid>(b.inner.id).unwrap();
+			a_solid
+				.collision_class
+				.collides_with(b_solid.collision_class)
+		})
+		{
+			colliding_pairs.push((a.inner, b.inner));
+		}
+		for _pass in 0..5
+		{
+			for &(inner1, inner2) in &colliding_pairs
+			{
+				let id1 = inner1.id;
+				let id2 = inner2.id;
+				let pos1 = self.world.get::<&comps::Position>(id1)?.pos;
+				let pos2 = self.world.get::<&comps::Position>(id2)?.pos;
+
+				let solid1 = *self.world.get::<&comps::Solid>(id1)?;
+				let solid2 = *self.world.get::<&comps::Solid>(id2)?;
+
+				let diff = pos2.xy() - pos1.xy();
+				let diff_norm = utils::max(0.1, diff.norm());
+
+				if diff_norm > solid1.size + solid2.size
+				{
+					continue;
+				}
+
+				if solid1.collision_class.interacts() && solid2.collision_class.interacts()
+				{
+					let diff = 0.9 * diff * (solid1.size + solid2.size - diff_norm) / diff_norm;
+
+					let f1 = 1. - solid1.mass / (solid2.mass + solid1.mass);
+					let f2 = 1. - solid2.mass / (solid2.mass + solid1.mass);
+					if f32::is_finite(f1)
+					{
+						self.world.get::<&mut comps::Position>(id1)?.pos -= diff * f1;
+					}
+					if f32::is_finite(f2)
+					{
+						self.world.get::<&mut comps::Position>(id2)?.pos += diff * f2;
+					}
+				}
+			}
+		}
+
 		// Remove dead entities
 		to_die.sort();
 		to_die.dedup();
@@ -401,16 +499,42 @@ impl Map
 			chunk.draw(state)?;
 		}
 
+		let mut drawables = vec![];
+		// Drawable
+		for (_, (drawable, position)) in self
+			.world
+			.query_mut::<(&comps::Drawable, &comps::Position)>()
+		{
+			drawables.push((drawable, position));
+		}
+
+		drawables.sort_by_key(|(_, position)| position.pos.y as i32);
+
+		for (_, position) in &drawables
+		{
+			let sprite = state.get_sprite("data/shadow.cfg")?;
+
+			sprite.draw(
+				utils::round_point(position.draw_pos(state.alpha)),
+				"Default",
+				0.,
+				1.,
+				&state,
+			);
+			// TODO: Why are primitives broken?
+			//state.prim.draw_filled_circle(
+			//	position.pos.x,
+			//	position.pos.y,
+			//	16.,
+			//	Color::from_rgba_f(1., 1., 1., 1.),
+			//);
+		}
+
 		state
 			.core
 			.use_shader(Some(&*state.palette_shader.upgrade().unwrap()))
 			.unwrap();
-
-		// Drawable
-		for (_, (drawable, position)) in self
-			.world
-			.query::<(&comps::Drawable, &comps::Position)>()
-			.iter()
+		for (drawable, position) in drawables
 		{
 			let sprite = state.get_sprite(&drawable.sprite)?;
 			let palette_index = state.palettes.get_palette_index(

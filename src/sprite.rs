@@ -26,6 +26,10 @@ struct SpriteDesc
 	width: i32,
 	height: i32,
 	#[serde(default)]
+	center_offt_x: i32,
+	#[serde(default)]
+	center_offt_y: i32,
+	#[serde(default)]
 	animations: HashMap<String, AnimationDesc>,
 	#[serde(default)]
 	palettes: Vec<String>,
@@ -176,8 +180,8 @@ impl Sprite
 			atlas_bmp.start.y,
 			w,
 			h,
-			pos.x.floor() - w / 2.,
-			pos.y.floor() - h / 2.,
+			pos.x.floor() - w / 2. - self.desc.center_offt_x as f32,
+			pos.y.floor() - h / 2. - self.desc.center_offt_y as f32,
 			Flag::zero(),
 		);
 	}

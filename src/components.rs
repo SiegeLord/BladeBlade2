@@ -46,6 +46,7 @@ pub struct Acceleration
 	pub pos: Vector2<f32>,
 }
 
+#[derive(Debug, Clone)]
 pub struct Drawable
 {
 	pub sprite: String,
@@ -67,4 +68,37 @@ impl Drawable
 			animation_speed: 1.,
 		}
 	}
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum CollisionClass
+{
+	Big,
+	Small,
+}
+
+impl CollisionClass
+{
+	pub fn collides_with(&self, other: Self) -> bool
+	{
+		match (self, other)
+		{
+			(CollisionClass::Big, CollisionClass::Big) => true,
+			(CollisionClass::Big, CollisionClass::Small) => true,
+			(CollisionClass::Small, CollisionClass::Big) => true,
+			(CollisionClass::Small, CollisionClass::Small) => false,
+		}
+	}
+	pub fn interacts(&self) -> bool
+	{
+		true
+	}
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Solid
+{
+	pub size: f32,
+	pub mass: f32,
+	pub collision_class: CollisionClass,
 }

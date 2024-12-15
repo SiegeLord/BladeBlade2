@@ -13,6 +13,7 @@ mod game_state;
 mod menu;
 mod palette;
 mod sfx;
+mod spatial_grid;
 mod sprite;
 mod ui;
 mod utils;
