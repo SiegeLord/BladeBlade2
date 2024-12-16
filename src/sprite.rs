@@ -138,29 +138,15 @@ impl Sprite
 	}
 
 	pub fn draw(
-		&self, pos: Point2<f32>, animation_name: &str, time: f64, speed: f32,
-		state: &game_state::GameState,
+		&self, pos: Point2<f32>, animation_state: &AnimationState, state: &game_state::GameState,
 	)
 	{
-		// Awkward to do the lookup twice?
-		let animation = &self.animations[animation_name];
-		let animation_desc = &self.desc.animations[animation_name];
-		let time = (time * 1000. * speed as f64) % animation.duration_ms;
-
-		// TODO: Should I make this stateful to avoid the scan?
-		let mut frame_idx = 0;
-		let mut cur_time = 0.;
-		for (i, dt) in animation_desc.frame_ms.iter().enumerate()
-		{
-			if cur_time + dt > time
-			{
-				frame_idx = i;
-				break;
-			}
-			cur_time += dt;
-		}
-
-		self.draw_frame(pos, animation_name, frame_idx as i32, state)
+		self.draw_frame(
+			pos,
+			&animation_state.animation_name,
+			animation_state.frame_idx,
+			state,
+		);
 	}
 
 	pub fn draw_frame(
@@ -170,7 +156,6 @@ impl Sprite
 	{
 		let w = self.desc.width as f32;
 		let h = self.desc.height as f32;
-		// Awkward to do the lookup three times!!!!?
 		let animation = &self.animations[animation_name];
 		let atlas_bmp = &animation.frames[frame_idx as usize];
 
@@ -184,5 +169,46 @@ impl Sprite
 			pos.y.floor() - h / 2. - self.desc.center_offt_y as f32,
 			Flag::zero(),
 		);
+	}
+
+	pub fn advance_state(&self, state: &mut AnimationState, amount: f64)
+	{
+		let animation_desc = &self.desc.animations[&state.animation_name];
+		state.frame_progress += amount * 1000.;
+		while state.frame_progress > animation_desc.frame_ms[state.frame_idx as usize]
+		{
+			state.frame_progress -= animation_desc.frame_ms[state.frame_idx as usize];
+			state.frame_idx = (state.frame_idx + 1) % animation_desc.frames.len() as i32;
+		}
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct AnimationState
+{
+	animation_name: String,
+	frame_progress: f64,
+	frame_idx: i32,
+}
+
+impl AnimationState
+{
+	pub fn new(animation_name: &str) -> Self
+	{
+		Self {
+			animation_name: animation_name.to_string(),
+			frame_progress: 0.,
+			frame_idx: 0,
+		}
+	}
+
+	pub fn set_animation(&mut self, animation_name: impl Into<String>)
+	{
+		let animation_name = animation_name.into();
+		if animation_name != self.animation_name
+		{
+			self.frame_idx = 0;
+		}
+		self.animation_name = animation_name;
 	}
 }

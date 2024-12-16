@@ -51,9 +51,7 @@ pub struct Drawable
 {
 	pub sprite: String,
 	pub palette: Option<String>,
-	pub animation_name: String,
-	pub animation_start: f64,
-	pub animation_speed: f32,
+	pub animation_state: sprite::AnimationState,
 }
 
 impl Drawable
@@ -63,9 +61,7 @@ impl Drawable
 		Self {
 			sprite: sprite.into(),
 			palette: None,
-			animation_name: "Default".to_string(),
-			animation_start: 0.,
-			animation_speed: 1.,
+			animation_state: sprite::AnimationState::new("Default"),
 		}
 	}
 }
@@ -101,4 +97,45 @@ pub struct Solid
 	pub size: f32,
 	pub mass: f32,
 	pub collision_class: CollisionClass,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum AIState
+{
+	Idle,
+	Wander,
+	Chase(hecs::Entity),
+	Attack(hecs::Entity),
+}
+
+impl AIState
+{
+	pub fn get_target(&self) -> Option<hecs::Entity>
+	{
+		match self
+		{
+			AIState::Chase(e) => Some(*e),
+			_ => None,
+		}
+	}
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct AI
+{
+	pub state: AIState,
+	pub next_state_time: f64,
+	pub target: Option<hecs::Entity>,
+}
+
+impl AI
+{
+	pub fn new() -> Self
+	{
+		Self {
+			state: AIState::Idle,
+			next_state_time: 0.,
+			target: None,
+		}
+	}
 }

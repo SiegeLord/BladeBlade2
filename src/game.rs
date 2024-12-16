@@ -138,22 +138,45 @@ impl Game
 	}
 }
 
-pub fn spawn_obj(pos: Point2<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
+pub fn spawn_player(pos: Point2<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
 {
 	let entity = world.spawn((
 		comps::Drawable::new("data/player_anim.cfg"),
 		comps::Position::new(pos),
 		comps::Velocity {
-			pos: Vector2::new(0., 0.),
+			pos: Vector2::zeros(),
 		},
 		comps::Acceleration {
-			pos: Vector2::new(0., 0.),
+			pos: Vector2::zeros(),
 		},
 		comps::Solid {
 			size: 8.,
 			mass: 1.,
 			collision_class: comps::CollisionClass::Big,
 		},
+	));
+	Ok(entity)
+}
+
+pub fn spawn_enemy(pos: Point2<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
+{
+	let mut drawable = comps::Drawable::new("data/player_anim.cfg");
+	drawable.palette = Some("data/player_pal2.png".to_string());
+	let entity = world.spawn((
+		drawable,
+		comps::Position::new(pos),
+		comps::Velocity {
+			pos: Vector2::zeros(),
+		},
+		comps::Acceleration {
+			pos: Vector2::zeros(),
+		},
+		comps::Solid {
+			size: 8.,
+			mass: 1.,
+			collision_class: comps::CollisionClass::Big,
+		},
+		comps::AI::new(),
 	));
 	Ok(entity)
 }
@@ -251,18 +274,16 @@ impl Map
 
 		let spawn_pos = Point2::new(100., 100.);
 
-		let player = spawn_obj(spawn_pos, &mut world)?;
+		let player = spawn_player(spawn_pos, &mut world)?;
 
 		for i in 0..3
 		{
 			for j in 0..3
 			{
-				let entity = spawn_obj(
+				spawn_enemy(
 					Point2::new(200. + i as f32 * 32., 200. + j as f32 * 32.),
 					&mut world,
 				)?;
-				world.get::<&mut comps::Drawable>(entity)?.palette =
-					Some("data/player_pal2.png".to_string());
 			}
 		}
 
@@ -302,9 +323,9 @@ impl Map
 		}
 
 		// Input.
-		if let Ok(acceleration) = self
+		if let Ok((_position, acceleration)) = self
 			.world
-			.query_one_mut::<&mut comps::Acceleration>(self.player)
+			.query_one_mut::<(&comps::Position, &mut comps::Acceleration)>(self.player)
 		{
 			let dx = state.controls.get_action_state(controls::Action::MoveRight)
 				- state.controls.get_action_state(controls::Action::MoveLeft);
@@ -314,21 +335,149 @@ impl Map
 			acceleration.pos = Vector2::new(dx, dy) * 1024.;
 		}
 
-		// Drawable animation selection.
-		for (_, (drawable, position, acceleration)) in self
+		// AI
+		let mut rng = thread_rng();
+		for (_, (position, acceleration, ai)) in self
 			.world
-			.query::<(&mut comps::Drawable, &comps::Position, &comps::Acceleration)>()
+			.query::<(&comps::Position, &mut comps::Acceleration, &mut comps::AI)>()
 			.iter()
 		{
+			let idle_time = 3.;
+			let wander_time = 0.5;
+			let chase_time = 1.;
+			let acceleration_amount = 64.;
+			let sense_range = 128.;
+
+			// TODO: Better target acquisition.
+			let mut target;
+			if let Some(cur_target) = ai.state.get_target()
+			{
+				target = Some(cur_target);
+			}
+			else
+			{
+				target = Some(self.player);
+			}
+
+			let target_position =
+				target.and_then(|target| self.world.get::<&comps::Position>(target).ok());
+			if let Some(target_position) = target_position.as_ref()
+			{
+				let dist = (target_position.pos - position.pos).norm();
+				if dist > sense_range
+				{
+					target = None;
+				}
+			}
+
+			match ai.state
+			{
+				comps::AIState::Idle =>
+				{
+					if let Some(target) = target
+					{
+						ai.state = comps::AIState::Chase(target);
+						ai.next_state_time = state.time() + chase_time;
+					}
+					else
+					{
+						acceleration.pos = Vector2::zeros();
+					}
+				}
+				comps::AIState::Wander =>
+				{
+					if let Some(target) = target
+					{
+						ai.state = comps::AIState::Chase(target);
+						ai.next_state_time = state.time() + chase_time;
+					}
+				}
+				comps::AIState::Chase(_) =>
+				{
+					if let Some(target_position) = target_position
+					{
+						let diff = (target_position.pos - position.pos).normalize();
+						acceleration.pos = diff * acceleration_amount;
+					}
+				}
+				_ => (),
+			}
+			if state.time() < ai.next_state_time
+			{
+				continue;
+			}
+
+			match ai.state
+			{
+				comps::AIState::Idle =>
+				{
+					let next_state = [(comps::AIState::Idle, 1), (comps::AIState::Wander, 1)];
+					ai.state = next_state.choose_weighted(&mut rng, |sw| sw.1).unwrap().0;
+					match ai.state
+					{
+						comps::AIState::Idle =>
+						{
+							ai.next_state_time = state.time() + idle_time;
+						}
+						comps::AIState::Wander =>
+						{
+							ai.next_state_time = state.time() + wander_time;
+							let dir_x = rng.gen_range(-1..=1) as f32;
+							let dir_y = rng.gen_range(-1..=1) as f32;
+							acceleration.pos = Vector2::new(dir_x, dir_y) * acceleration_amount;
+						}
+						_ => (),
+					}
+				}
+				comps::AIState::Wander =>
+				{
+					ai.state = comps::AIState::Idle;
+					ai.next_state_time = state.time() + idle_time;
+				}
+				comps::AIState::Chase(_) =>
+				{
+					if target.is_none()
+					{
+						ai.state = comps::AIState::Idle;
+						ai.next_state_time = state.time() + idle_time;
+					}
+					else
+					{
+						ai.next_state_time = state.time() + chase_time;
+					}
+				}
+				_ => (),
+			}
+		}
+
+		// Drawable animation state handling.
+		for (_, (drawable, position, acceleration, velocity)) in self
+			.world
+			.query::<(
+				&mut comps::Drawable,
+				&comps::Position,
+				&comps::Acceleration,
+				&comps::Velocity,
+			)>()
+			.iter()
+		{
+			let sprite = state.get_sprite(&drawable.sprite)?;
+			let mut speed = 1.;
 			if acceleration.pos.norm() > 0.
 			{
-				drawable.animation_name = format!("Move{}", vec_to_dir_name(acceleration.pos));
+				drawable
+					.animation_state
+					.set_animation(format!("Move{}", vec_to_dir_name(acceleration.pos)));
+				speed = velocity.pos.norm() / 256.;
 			}
 			else
 			{
 				let dir = Vector2::new(position.dir.cos(), position.dir.sin());
-				drawable.animation_name = format!("Stand{}", vec_to_dir_name(dir));
+				drawable
+					.animation_state
+					.set_animation(format!("Stand{}", vec_to_dir_name(dir)));
 			}
+			sprite.advance_state(&mut drawable.animation_state, (speed * DT) as f64);
 		}
 
 		// Movement.
@@ -338,7 +487,6 @@ impl Map
 			.iter()
 		{
 			let decel = 1024.;
-			let max_vel = 196.;
 			if velocity.pos.x.abs() > 0. && acceleration.pos.x == 0.
 			{
 				if velocity.pos.x.abs() <= decel * DT
@@ -361,10 +509,6 @@ impl Map
 					acceleration.pos.y = -velocity.pos.y.signum() * decel;
 				}
 			}
-			if velocity.pos.norm() > max_vel
-			{
-				velocity.pos = velocity.pos.normalize() * max_vel;
-			}
 		}
 
 		for (_, (velocity, acceleration)) in self
@@ -372,10 +516,19 @@ impl Map
 			.query::<(&mut comps::Velocity, &comps::Acceleration)>()
 			.iter()
 		{
-			velocity.pos += DT * acceleration.pos;
+			let max_vel = 196.;
+			velocity.pos = velocity.pos + DT * acceleration.pos;
+			if acceleration.pos.norm() > 0.
+			{
+				let projected_speed = velocity.pos.dot(&acceleration.pos.normalize());
+				if projected_speed > max_vel
+				{
+					velocity.pos *= max_vel / projected_speed;
+				}
+			}
 		}
 
-		for (_, (position, velocity)) in self
+		for (_id, (position, velocity)) in self
 			.world
 			.query::<(&mut comps::Position, &comps::Velocity)>()
 			.iter()
@@ -514,11 +667,10 @@ impl Map
 		{
 			let sprite = state.get_sprite("data/shadow.cfg")?;
 
-			sprite.draw(
+			sprite.draw_frame(
 				utils::round_point(position.draw_pos(state.alpha)),
 				"Default",
-				0.,
-				1.,
+				0,
 				&state,
 			);
 			// TODO: Why are primitives broken?
@@ -555,9 +707,7 @@ impl Map
 
 			sprite.draw(
 				utils::round_point(position.draw_pos(state.alpha)),
-				&drawable.animation_name,
-				state.time() - drawable.animation_start,
-				drawable.animation_speed,
+				&drawable.animation_state,
 				&state,
 			);
 		}
