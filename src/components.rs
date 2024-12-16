@@ -3,6 +3,7 @@ use allegro::*;
 use na::{Point2, Vector2};
 use nalgebra as na;
 use rand::prelude::*;
+use serde_derive::{Deserialize, Serialize};
 
 #[derive(Debug, Copy, Clone)]
 pub struct Position
@@ -136,6 +137,50 @@ impl AI
 			state: AIState::Idle,
 			next_state_time: 0.,
 			target: None,
+		}
+	}
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct StatValues
+{
+	pub speed: f32,
+	pub acceleration: f32,
+}
+
+impl StatValues
+{
+	pub fn new_player() -> Self
+	{
+		Self {
+			speed: 196.,
+			acceleration: 1024.,
+		}
+	}
+
+	pub fn new_enemy() -> Self
+	{
+		Self {
+			speed: 64.,
+			acceleration: 1024.,
+		}
+	}
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Stats
+{
+	pub base_values: StatValues,
+	pub values: StatValues,
+}
+
+impl Stats
+{
+	pub fn new(base_values: StatValues) -> Self
+	{
+		Self {
+			base_values: base_values,
+			values: base_values,
 		}
 	}
 }

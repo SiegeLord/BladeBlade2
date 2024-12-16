@@ -154,6 +154,7 @@ pub fn spawn_player(pos: Point2<f32>, world: &mut hecs::World) -> Result<hecs::E
 			mass: 1.,
 			collision_class: comps::CollisionClass::Big,
 		},
+		comps::Stats::new(comps::StatValues::new_player()),
 	));
 	Ok(entity)
 }
@@ -177,6 +178,7 @@ pub fn spawn_enemy(pos: Point2<f32>, world: &mut hecs::World) -> Result<hecs::En
 			collision_class: comps::CollisionClass::Big,
 		},
 		comps::AI::new(),
+		comps::Stats::new(comps::StatValues::new_enemy()),
 	));
 	Ok(entity)
 }
@@ -323,31 +325,37 @@ impl Map
 		}
 
 		// Input.
-		if let Ok((_position, acceleration)) = self
-			.world
-			.query_one_mut::<(&comps::Position, &mut comps::Acceleration)>(self.player)
+		if let Ok((_position, acceleration, stats)) =
+			self.world
+				.query_one_mut::<(&comps::Position, &mut comps::Acceleration, &comps::Stats)>(
+					self.player,
+				)
 		{
 			let dx = state.controls.get_action_state(controls::Action::MoveRight)
 				- state.controls.get_action_state(controls::Action::MoveLeft);
 			let dy = state.controls.get_action_state(controls::Action::MoveDown)
 				- state.controls.get_action_state(controls::Action::MoveUp);
 
-			acceleration.pos = Vector2::new(dx, dy) * 1024.;
+			acceleration.pos = Vector2::new(dx, dy) * stats.values.acceleration;
 		}
 
 		// AI
 		let mut rng = thread_rng();
-		for (_, (position, acceleration, ai)) in self
+		for (_, (position, acceleration, ai, stats)) in self
 			.world
-			.query::<(&comps::Position, &mut comps::Acceleration, &mut comps::AI)>()
+			.query::<(
+				&comps::Position,
+				&mut comps::Acceleration,
+				&mut comps::AI,
+				&comps::Stats,
+			)>()
 			.iter()
 		{
 			let idle_time = 3.;
 			let wander_time = 0.5;
 			let chase_time = 1.;
 			let attack_time = 1.;
-			let acceleration_amount = 64.;
-			let sense_range = 128.;
+			let sense_range = 64.;
 
 			// TODO: Better target acquisition.
 			let mut target;
@@ -358,6 +366,16 @@ impl Map
 			else
 			{
 				target = Some(self.player);
+				let target_position =
+					target.and_then(|target| self.world.get::<&comps::Position>(target).ok());
+				if let Some(target_position) = target_position.as_ref()
+				{
+					let dist = (target_position.pos - position.pos).norm();
+					if dist > sense_range
+					{
+						target = None;
+					}
+				}
 			}
 
 			let target_position =
@@ -365,7 +383,7 @@ impl Map
 			if let Some(target_position) = target_position.as_ref()
 			{
 				let dist = (target_position.pos - position.pos).norm();
-				if dist > sense_range
+				if dist > 2. * sense_range
 				{
 					target = None;
 				}
@@ -392,13 +410,14 @@ impl Map
 							.choose_weighted(&mut rng, |sw| sw.1)
 							.ok()
 							.map(|sw| sw.0);
-						match ai.state
+						match next_state
 						{
-							comps::AIState::Wander =>
+							Some(comps::AIState::Wander) =>
 							{
 								let dir_x = rng.gen_range(-1..=1) as f32;
 								let dir_y = rng.gen_range(-1..=1) as f32;
-								acceleration.pos = Vector2::new(dir_x, dir_y) * acceleration_amount;
+								acceleration.pos =
+									Vector2::new(dir_x, dir_y) * stats.values.acceleration;
 							}
 							_ => (),
 						}
@@ -420,7 +439,7 @@ impl Map
 					if let Some(target_position) = target_position
 					{
 						let diff = (target_position.pos - position.pos).normalize();
-						acceleration.pos = diff * acceleration_amount;
+						acceleration.pos = diff * stats.values.acceleration;
 					}
 					if state.time() > ai.next_state_time
 					{
@@ -479,7 +498,7 @@ impl Map
 				drawable
 					.animation_state
 					.set_animation(format!("Move{}", vec_to_dir_name(acceleration.pos)));
-				speed = velocity.pos.norm() / 256.;
+				speed = velocity.pos.norm() / 196.;
 			}
 			else
 			{
@@ -522,19 +541,18 @@ impl Map
 			}
 		}
 
-		for (_, (velocity, acceleration)) in self
+		for (_, (velocity, acceleration, stats)) in self
 			.world
-			.query::<(&mut comps::Velocity, &comps::Acceleration)>()
+			.query::<(&mut comps::Velocity, &comps::Acceleration, &comps::Stats)>()
 			.iter()
 		{
-			let max_vel = 196.;
 			velocity.pos = velocity.pos + DT * acceleration.pos;
 			if acceleration.pos.norm() > 0.
 			{
 				let projected_speed = velocity.pos.dot(&acceleration.pos.normalize());
-				if projected_speed > max_vel
+				if projected_speed > stats.values.speed
 				{
-					velocity.pos *= max_vel / projected_speed;
+					velocity.pos *= stats.values.speed / projected_speed;
 				}
 			}
 		}
