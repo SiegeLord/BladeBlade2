@@ -48,14 +48,15 @@ pub struct Acceleration
 }
 
 #[derive(Debug, Clone)]
-pub struct Drawable
+pub struct Appearance
 {
 	pub sprite: String,
 	pub palette: Option<String>,
 	pub animation_state: sprite::AnimationState,
+	pub speed: f32,
 }
 
-impl Drawable
+impl Appearance
 {
 	pub fn new(sprite: impl Into<String>) -> Self
 	{
@@ -63,6 +64,7 @@ impl Drawable
 			sprite: sprite.into(),
 			palette: None,
 			animation_state: sprite::AnimationState::new("Default"),
+			speed: 1.,
 		}
 	}
 }
@@ -70,8 +72,10 @@ impl Drawable
 #[derive(Debug, Copy, Clone)]
 pub enum CollisionClass
 {
-	Big,
-	Small,
+	BigEnemy,
+	BigPlayer,
+	SmallEnemy,
+	SmallPlayer,
 }
 
 impl CollisionClass
@@ -80,10 +84,25 @@ impl CollisionClass
 	{
 		match (self, other)
 		{
-			(CollisionClass::Big, CollisionClass::Big) => true,
-			(CollisionClass::Big, CollisionClass::Small) => true,
-			(CollisionClass::Small, CollisionClass::Big) => true,
-			(CollisionClass::Small, CollisionClass::Small) => false,
+			(CollisionClass::BigEnemy, CollisionClass::BigEnemy) => true,
+			(CollisionClass::BigEnemy, CollisionClass::BigPlayer) => true,
+			(CollisionClass::BigEnemy, CollisionClass::SmallEnemy) => false,
+			(CollisionClass::BigEnemy, CollisionClass::SmallPlayer) => true,
+
+			(CollisionClass::BigPlayer, CollisionClass::BigEnemy) => true,
+			(CollisionClass::BigPlayer, CollisionClass::BigPlayer) => true,
+			(CollisionClass::BigPlayer, CollisionClass::SmallEnemy) => true,
+			(CollisionClass::BigPlayer, CollisionClass::SmallPlayer) => false,
+
+			(CollisionClass::SmallEnemy, CollisionClass::BigEnemy) => false,
+			(CollisionClass::SmallEnemy, CollisionClass::BigPlayer) => true,
+			(CollisionClass::SmallEnemy, CollisionClass::SmallEnemy) => false,
+			(CollisionClass::SmallEnemy, CollisionClass::SmallPlayer) => false,
+
+			(CollisionClass::SmallPlayer, CollisionClass::BigEnemy) => true,
+			(CollisionClass::SmallPlayer, CollisionClass::BigPlayer) => false,
+			(CollisionClass::SmallPlayer, CollisionClass::SmallEnemy) => false,
+			(CollisionClass::SmallPlayer, CollisionClass::SmallPlayer) => false,
 		}
 	}
 	pub fn interacts(&self) -> bool
@@ -165,6 +184,14 @@ impl StatValues
 			acceleration: 1024.,
 		}
 	}
+
+	pub fn new_fireball() -> Self
+	{
+		Self {
+			speed: 256.,
+			acceleration: 1024.,
+		}
+	}
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -183,4 +210,56 @@ impl Stats
 			values: base_values,
 		}
 	}
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum AttackKind
+{
+	BladeBlade,
+	Fireball,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Attack
+{
+	pub want_attack: bool,
+	pub target_position: Point2<f32>,
+	pub kind: AttackKind,
+}
+
+impl Attack
+{
+	pub fn new(kind: AttackKind) -> Self
+	{
+		Self {
+			want_attack: false,
+			target_position: Point2::new(0., 0.),
+			kind: kind,
+		}
+	}
+}
+
+pub struct TimeToDie
+{
+	pub time: f64,
+}
+
+impl TimeToDie
+{
+	pub fn new(time: f64) -> Self
+	{
+		Self { time: time }
+	}
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum ContactEffect
+{
+	Die,
+}
+
+#[derive(Debug, Clone)]
+pub struct OnContactEffect
+{
+	pub effects: Vec<ContactEffect>,
 }

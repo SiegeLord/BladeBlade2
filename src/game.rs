@@ -28,6 +28,7 @@ impl Game
 	pub fn new(state: &mut game_state::GameState) -> Result<Self>
 	{
 		state.cache_sprite("data/player_anim.cfg")?;
+		state.cache_sprite("data/fireball_anim.cfg")?;
 		state.cache_sprite("data/shadow.cfg")?;
 
 		Ok(Self {
@@ -141,7 +142,7 @@ impl Game
 pub fn spawn_player(pos: Point2<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
 {
 	let entity = world.spawn((
-		comps::Drawable::new("data/player_anim.cfg"),
+		comps::Appearance::new("data/player_anim.cfg"),
 		comps::Position::new(pos),
 		comps::Velocity {
 			pos: Vector2::zeros(),
@@ -152,19 +153,20 @@ pub fn spawn_player(pos: Point2<f32>, world: &mut hecs::World) -> Result<hecs::E
 		comps::Solid {
 			size: 8.,
 			mass: 1.,
-			collision_class: comps::CollisionClass::Big,
+			collision_class: comps::CollisionClass::BigPlayer,
 		},
 		comps::Stats::new(comps::StatValues::new_player()),
+		comps::Attack::new(comps::AttackKind::BladeBlade),
 	));
 	Ok(entity)
 }
 
 pub fn spawn_enemy(pos: Point2<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
 {
-	let mut drawable = comps::Drawable::new("data/player_anim.cfg");
-	drawable.palette = Some("data/player_pal2.png".to_string());
+	let mut appearance = comps::Appearance::new("data/player_anim.cfg");
+	appearance.palette = Some("data/player_pal2.png".to_string());
 	let entity = world.spawn((
-		drawable,
+		appearance,
 		comps::Position::new(pos),
 		comps::Velocity {
 			pos: Vector2::zeros(),
@@ -175,10 +177,37 @@ pub fn spawn_enemy(pos: Point2<f32>, world: &mut hecs::World) -> Result<hecs::En
 		comps::Solid {
 			size: 8.,
 			mass: 1.,
-			collision_class: comps::CollisionClass::Big,
+			collision_class: comps::CollisionClass::BigEnemy,
 		},
 		comps::AI::new(),
 		comps::Stats::new(comps::StatValues::new_enemy()),
+		comps::Attack::new(comps::AttackKind::Fireball),
+	));
+	Ok(entity)
+}
+
+pub fn spawn_fireball(
+	pos: Point2<f32>, velocity_pos: Vector2<f32>, acceleration_pos: Vector2<f32>, time: f64,
+	world: &mut hecs::World,
+) -> Result<hecs::Entity>
+{
+	let entity = world.spawn((
+		comps::Appearance::new("data/fireball_anim.cfg"),
+		comps::Position::new(pos),
+		comps::Velocity { pos: velocity_pos },
+		comps::Acceleration {
+			pos: acceleration_pos,
+		},
+		comps::Solid {
+			size: 8.,
+			mass: 0.,
+			collision_class: comps::CollisionClass::SmallEnemy,
+		},
+		comps::Stats::new(comps::StatValues::new_fireball()),
+		comps::TimeToDie::new(time + 1.),
+		comps::OnContactEffect {
+			effects: vec![comps::ContactEffect::Die],
+		},
 	));
 	Ok(entity)
 }
@@ -278,9 +307,9 @@ impl Map
 
 		let player = spawn_player(spawn_pos, &mut world)?;
 
-		for i in 0..3
+		for i in 0..1
 		{
-			for j in 0..3
+			for j in 0..1
 			{
 				spawn_enemy(
 					Point2::new(200. + i as f32 * 32., 200. + j as f32 * 32.),
@@ -341,13 +370,14 @@ impl Map
 
 		// AI
 		let mut rng = thread_rng();
-		for (_, (position, acceleration, ai, stats)) in self
+		for (_, (position, acceleration, ai, stats, attack)) in self
 			.world
 			.query::<(
-				&comps::Position,
+				&mut comps::Position,
 				&mut comps::Acceleration,
 				&mut comps::AI,
 				&comps::Stats,
+				&mut comps::Attack,
 			)>()
 			.iter()
 		{
@@ -355,7 +385,8 @@ impl Map
 			let wander_time = 0.5;
 			let chase_time = 1.;
 			let attack_time = 1.;
-			let sense_range = 64.;
+			let sense_range = 96.;
+			let attack_range = 64.;
 
 			// TODO: Better target acquisition.
 			let mut target;
@@ -380,12 +411,17 @@ impl Map
 
 			let target_position =
 				target.and_then(|target| self.world.get::<&comps::Position>(target).ok());
+			let mut in_range = false;
 			if let Some(target_position) = target_position.as_ref()
 			{
 				let dist = (target_position.pos - position.pos).norm();
 				if dist > 2. * sense_range
 				{
 					target = None;
+				}
+				if dist < attack_range
+				{
+					in_range = true;
 				}
 			}
 
@@ -434,12 +470,25 @@ impl Map
 						next_state = Some(comps::AIState::Idle);
 					}
 				}
-				comps::AIState::Chase(_) =>
+				comps::AIState::Chase(cur_target) =>
 				{
 					if let Some(target_position) = target_position
 					{
-						let diff = (target_position.pos - position.pos).normalize();
-						acceleration.pos = diff * stats.values.acceleration;
+						if in_range
+						{
+							acceleration.pos = Vector2::zeros();
+							attack.want_attack = true;
+							attack.target_position = target_position.pos;
+							let diff = target_position.pos - position.pos;
+							position.dir = diff.y.atan2(diff.x);
+							next_state = Some(comps::AIState::Chase(cur_target));
+						}
+						else
+						{
+							let diff = (target_position.pos - position.pos).normalize();
+							acceleration.pos = diff * stats.values.acceleration;
+							attack.want_attack = false;
+						}
 					}
 					if state.time() > ai.next_state_time
 					{
@@ -480,34 +529,86 @@ impl Map
 			}
 		}
 
-		// Drawable animation state handling.
-		for (_, (drawable, position, acceleration, velocity)) in self
+		// Appearance animation state handling.
+		for (_, (appearance, position, acceleration, velocity)) in self
 			.world
 			.query::<(
-				&mut comps::Drawable,
+				&mut comps::Appearance,
 				&comps::Position,
 				&comps::Acceleration,
 				&comps::Velocity,
 			)>()
 			.iter()
 		{
-			let sprite = state.get_sprite(&drawable.sprite)?;
-			let mut speed = 1.;
 			if acceleration.pos.norm() > 0.
 			{
-				drawable
+				appearance
 					.animation_state
-					.set_animation(format!("Move{}", vec_to_dir_name(acceleration.pos)));
-				speed = velocity.pos.norm() / 196.;
+					.set_new_animation(format!("Move{}", vec_to_dir_name(acceleration.pos)));
+				appearance.speed = velocity.pos.norm() / 196.;
 			}
 			else
 			{
 				let dir = Vector2::new(position.dir.cos(), position.dir.sin());
-				drawable
+				appearance
 					.animation_state
-					.set_animation(format!("Stand{}", vec_to_dir_name(dir)));
+					.set_new_animation(format!("Stand{}", vec_to_dir_name(dir)));
+				appearance.speed = 1.;
 			}
-			sprite.advance_state(&mut drawable.animation_state, (speed * DT) as f64);
+		}
+		for (_, (appearance, position, attack)) in self
+			.world
+			.query::<(&mut comps::Appearance, &comps::Position, &comps::Attack)>()
+			.iter()
+		{
+			if attack.want_attack
+			{
+				let dir = Vector2::new(position.dir.cos(), position.dir.sin());
+				appearance
+					.animation_state
+					.set_new_animation(format!("Attack{}", vec_to_dir_name(dir)));
+				appearance.speed = 1.;
+			}
+		}
+		for (_, appearance) in self.world.query::<&mut comps::Appearance>().iter()
+		{
+			let sprite = state.get_sprite(&appearance.sprite)?;
+			sprite.advance_state(
+				&mut appearance.animation_state,
+				(appearance.speed * DT) as f64,
+			);
+		}
+
+		// Attacking.
+		let mut spawn_fns = vec![];
+		for (_, (appearance, position, attack)) in self
+			.world
+			.query::<(&mut comps::Appearance, &comps::Position, &comps::Attack)>()
+			.iter()
+		{
+			if attack.want_attack
+			{
+				let dir = (attack.target_position - position.pos).normalize();
+				for _ in 0..appearance.animation_state.drain_activations()
+				{
+					match attack.kind
+					{
+						comps::AttackKind::Fireball =>
+						{
+							let pos = position.pos.clone();
+							let time = state.time();
+							spawn_fns.push(move |world: &mut hecs::World| {
+								spawn_fireball(pos, dir * 100., dir * 100., time, world)
+							});
+						}
+						_ => (),
+					}
+				}
+			}
+		}
+		for spawn_fn in spawn_fns
+		{
+			spawn_fn(&mut self.world)?;
 		}
 
 		// Movement.
@@ -604,7 +705,9 @@ impl Map
 		{
 			colliding_pairs.push((a.inner, b.inner));
 		}
-		for _pass in 0..5
+
+		let mut on_contact_effects = vec![];
+		for pass in 0..5
 		{
 			for &(inner1, inner2) in &colliding_pairs
 			{
@@ -639,13 +742,48 @@ impl Map
 						self.world.get::<&mut comps::Position>(id2)?.pos += diff * f2;
 					}
 				}
+				if pass == 0
+				{
+					for (id, other_id) in [(id1, Some(id2)), (id2, Some(id1))]
+					{
+						if let Ok(on_contact_effect) = self.world.get::<&comps::OnContactEffect>(id)
+						{
+							on_contact_effects.push((
+								id,
+								other_id,
+								on_contact_effect.effects.clone(),
+							));
+						}
+					}
+				}
+			}
+		}
+
+		// On contact effects.
+		for (id, other_id, effects) in on_contact_effects
+		{
+			for effect in effects
+			{
+				match (effect, other_id)
+				{
+					(comps::ContactEffect::Die, _) => to_die.push((true, id)),
+				}
+			}
+		}
+
+		// Time to die
+		for (id, time_to_die) in self.world.query_mut::<&comps::TimeToDie>()
+		{
+			if state.time() > time_to_die.time
+			{
+				to_die.push((true, id));
 			}
 		}
 
 		// Remove dead entities
-		to_die.sort();
-		to_die.dedup();
-		for id in to_die
+		to_die.sort_by_key(|s_id| s_id.1);
+		to_die.dedup_by_key(|s_id| s_id.1);
+		for (_, id) in to_die
 		{
 			//println!("died {id:?}");
 			self.world.despawn(id)?;
@@ -681,18 +819,18 @@ impl Map
 			chunk.draw(state)?;
 		}
 
-		let mut drawables = vec![];
-		// Drawable
-		for (_, (drawable, position)) in self
+		let mut appearances = vec![];
+		// Appearance
+		for (_, (appearance, position)) in self
 			.world
-			.query_mut::<(&comps::Drawable, &comps::Position)>()
+			.query_mut::<(&comps::Appearance, &comps::Position)>()
 		{
-			drawables.push((drawable, position));
+			appearances.push((appearance, position));
 		}
 
-		drawables.sort_by_key(|(_, position)| position.pos.y as i32);
+		appearances.sort_by_key(|(_, position)| position.pos.y as i32);
 
-		for (_, position) in &drawables
+		for (_, position) in &appearances
 		{
 			let sprite = state.get_sprite("data/shadow.cfg")?;
 
@@ -715,11 +853,11 @@ impl Map
 			.core
 			.use_shader(Some(&*state.palette_shader.upgrade().unwrap()))
 			.unwrap();
-		for (drawable, position) in drawables
+		for (appearance, position) in appearances
 		{
-			let sprite = state.get_sprite(&drawable.sprite)?;
+			let sprite = state.get_sprite(&appearance.sprite)?;
 			let palette_index = state.palettes.get_palette_index(
-				drawable
+				appearance
 					.palette
 					.as_ref()
 					.unwrap_or(&sprite.get_palettes()[0]),
@@ -736,7 +874,7 @@ impl Map
 
 			sprite.draw(
 				utils::round_point(position.draw_pos(state.alpha)),
-				&drawable.animation_state,
+				&appearance.animation_state,
 				&state,
 			);
 		}

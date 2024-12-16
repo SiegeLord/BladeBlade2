@@ -12,6 +12,8 @@ struct AnimationDesc
 	frames: Vec<i32>,
 	#[serde(default)]
 	frame_ms: Vec<f64>,
+	#[serde(default)]
+	active_frame: i32,
 }
 
 fn default_false() -> bool
@@ -99,6 +101,7 @@ impl Sprite
 			AnimationDesc {
 				frames: (0..frames.len()).map(|i| i as i32 + 1).collect(),
 				frame_ms: vec![],
+				active_frame: 0,
 			},
 		);
 
@@ -173,12 +176,22 @@ impl Sprite
 
 	pub fn advance_state(&self, state: &mut AnimationState, amount: f64)
 	{
+		if state.animation_name != state.new_animation_name
+		{
+			state.animation_name = state.new_animation_name.clone();
+			state.frame_idx = 0;
+			state.num_activations = 0;
+		}
 		let animation_desc = &self.desc.animations[&state.animation_name];
 		state.frame_progress += amount * 1000.;
 		while state.frame_progress > animation_desc.frame_ms[state.frame_idx as usize]
 		{
 			state.frame_progress -= animation_desc.frame_ms[state.frame_idx as usize];
 			state.frame_idx = (state.frame_idx + 1) % animation_desc.frames.len() as i32;
+			if state.frame_idx == animation_desc.active_frame
+			{
+				state.num_activations += 1;
+			}
 		}
 	}
 }
@@ -187,8 +200,10 @@ impl Sprite
 pub struct AnimationState
 {
 	animation_name: String,
+	new_animation_name: String,
 	frame_progress: f64,
 	frame_idx: i32,
+	num_activations: i32,
 }
 
 impl AnimationState
@@ -197,18 +212,22 @@ impl AnimationState
 	{
 		Self {
 			animation_name: animation_name.to_string(),
+			new_animation_name: animation_name.to_string(),
 			frame_progress: 0.,
 			frame_idx: 0,
+			num_activations: 0,
 		}
 	}
 
-	pub fn set_animation(&mut self, animation_name: impl Into<String>)
+	pub fn set_new_animation(&mut self, animation_name: impl Into<String>)
 	{
-		let animation_name = animation_name.into();
-		if animation_name != self.animation_name
-		{
-			self.frame_idx = 0;
-		}
-		self.animation_name = animation_name;
+		self.new_animation_name = animation_name.into();
+	}
+
+	pub fn drain_activations(&mut self) -> i32
+	{
+		let res = self.num_activations;
+		self.num_activations = 0;
+		res
 	}
 }
