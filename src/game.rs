@@ -1,6 +1,6 @@
 use crate::components::Velocity;
 use crate::error::Result;
-use crate::utils::DT;
+use crate::utils::{XYExt, DT};
 use crate::{astar, components as comps, controls, game_state, spatial_grid, sprite, ui, utils};
 use allegro::*;
 use allegro_font::*;
@@ -139,16 +139,16 @@ impl Game
 	}
 }
 
-pub fn spawn_player(pos: Point2<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
+pub fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
 {
 	let entity = world.spawn((
 		comps::Appearance::new("data/player_anim.cfg"),
 		comps::Position::new(pos),
 		comps::Velocity {
-			pos: Vector2::zeros(),
+			pos: Vector3::zeros(),
 		},
 		comps::Acceleration {
-			pos: Vector2::zeros(),
+			pos: Vector3::zeros(),
 		},
 		comps::Solid {
 			size: 8.,
@@ -157,11 +157,13 @@ pub fn spawn_player(pos: Point2<f32>, world: &mut hecs::World) -> Result<hecs::E
 		},
 		comps::Stats::new(comps::StatValues::new_player()),
 		comps::Attack::new(comps::AttackKind::BladeBlade),
+		comps::Jump::new(),
+		comps::AffectedByGravity::new(),
 	));
 	Ok(entity)
 }
 
-pub fn spawn_enemy(pos: Point2<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
+pub fn spawn_enemy(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
 {
 	let mut appearance = comps::Appearance::new("data/player_anim.cfg");
 	appearance.palette = Some("data/player_pal2.png".to_string());
@@ -169,10 +171,10 @@ pub fn spawn_enemy(pos: Point2<f32>, world: &mut hecs::World) -> Result<hecs::En
 		appearance,
 		comps::Position::new(pos),
 		comps::Velocity {
-			pos: Vector2::zeros(),
+			pos: Vector3::zeros(),
 		},
 		comps::Acceleration {
-			pos: Vector2::zeros(),
+			pos: Vector3::zeros(),
 		},
 		comps::Solid {
 			size: 8.,
@@ -187,7 +189,7 @@ pub fn spawn_enemy(pos: Point2<f32>, world: &mut hecs::World) -> Result<hecs::En
 }
 
 pub fn spawn_fireball(
-	pos: Point2<f32>, velocity_pos: Vector2<f32>, acceleration_pos: Vector2<f32>, time: f64,
+	pos: Point3<f32>, velocity_pos: Vector3<f32>, acceleration_pos: Vector3<f32>, time: f64,
 	world: &mut hecs::World,
 ) -> Result<hecs::Entity>
 {
@@ -227,7 +229,7 @@ fn vec_to_dir_name(vec: Vector2<f32>) -> &'static str
 struct GridInner
 {
 	id: hecs::Entity,
-	pos: Point2<f32>,
+	pos: Point3<f32>,
 }
 
 struct MapChunk
@@ -269,7 +271,7 @@ impl MapChunk
 		})
 	}
 
-	fn draw(&self, state: &game_state::GameState) -> Result<()>
+	fn draw(&self, pos: Point2<f32>, state: &game_state::GameState) -> Result<()>
 	{
 		let sprite = state.get_sprite("data/terrain.cfg")?;
 		for y in 0..self.height
@@ -278,7 +280,9 @@ impl MapChunk
 			{
 				let tile_idx = self.tiles[y as usize * self.height as usize + x as usize];
 				sprite.draw_frame(
-					Point2::new(x as f32 * TILE_SIZE, y as f32 * TILE_SIZE),
+					utils::round_point(
+						pos + Vector2::new(x as f32 * TILE_SIZE, y as f32 * TILE_SIZE),
+					),
 					"Default",
 					tile_idx,
 					state,
@@ -294,7 +298,8 @@ struct Map
 	world: hecs::World,
 	player: hecs::Entity,
 	chunks: Vec<MapChunk>,
-	camera_pos: Point2<f32>,
+	camera_pos: comps::Position,
+	camera_lookahead: Vector2<f32>,
 }
 
 impl Map
@@ -303,7 +308,7 @@ impl Map
 	{
 		let mut world = hecs::World::new();
 
-		let spawn_pos = Point2::new(100., 100.);
+		let spawn_pos = Point3::new(100., 100., 0.);
 
 		let player = spawn_player(spawn_pos, &mut world)?;
 
@@ -312,7 +317,7 @@ impl Map
 			for j in 0..3
 			{
 				spawn_enemy(
-					Point2::new(200. + i as f32 * 32., 200. + j as f32 * 32.),
+					Point3::new(200. + i as f32 * 32., 200. + j as f32 * 32., 0.),
 					&mut world,
 				)?;
 			}
@@ -324,22 +329,21 @@ impl Map
 			world: world,
 			player: player,
 			chunks: vec![MapChunk::new("data/test.tmx")?],
-			camera_pos: spawn_pos,
+			camera_pos: comps::Position::new(spawn_pos),
+			camera_lookahead: Vector2::zeros(),
 		})
 	}
 
 	fn camera_to_world(&self, pos: Point2<f32>, state: &game_state::GameState) -> Point2<f32>
 	{
-		self.camera_pos + pos.coords
+		self.camera_pos.pos.xy() + pos.coords
 			- Vector2::new(state.buffer_width() / 2., state.buffer_height() / 2.)
 	}
 
-	fn camera_transform(&self, state: &game_state::GameState) -> Transform
+	fn camera_shift(&self, state: &game_state::GameState) -> Vector2<f32>
 	{
-		let mut transform = Transform::identity();
-		transform.translate(-self.camera_pos.x, -self.camera_pos.y);
-		transform.translate(state.buffer_width() / 2., state.buffer_height() / 2.);
-		transform
+		self.camera_lookahead - self.camera_pos.draw_pos(state.alpha).xy().coords
+			+ Vector2::new(state.buffer_width() / 2., state.buffer_height() / 2.)
 	}
 
 	fn logic(&mut self, state: &mut game_state::GameState)
@@ -352,20 +356,49 @@ impl Map
 		{
 			position.snapshot();
 		}
+		self.camera_pos.snapshot();
 
 		// Input.
-		if let Ok((_position, acceleration, stats)) =
-			self.world
-				.query_one_mut::<(&comps::Position, &mut comps::Acceleration, &comps::Stats)>(
-					self.player,
-				)
+		if let Ok((position, acceleration, velocity, stats, jump, affected_by_gravity)) =
+			self.world.query_one_mut::<(
+				&comps::Position,
+				&mut comps::Acceleration,
+				&mut comps::Velocity,
+				&comps::Stats,
+				&mut comps::Jump,
+				&mut comps::AffectedByGravity,
+			)>(self.player)
 		{
 			let dx = state.controls.get_action_state(controls::Action::MoveRight)
 				- state.controls.get_action_state(controls::Action::MoveLeft);
 			let dy = state.controls.get_action_state(controls::Action::MoveDown)
 				- state.controls.get_action_state(controls::Action::MoveUp);
 
-			acceleration.pos = Vector2::new(dx, dy) * stats.values.acceleration;
+			let mut air_control = 0.25;
+			if position.pos.z == 0.
+			{
+				air_control = 1.;
+			}
+			acceleration.pos = Vector3::new(dx, dy, 0.) * air_control * stats.values.acceleration;
+
+			let want_jump = state.controls.get_action_state(controls::Action::Jump) > 0.5;
+			if position.pos.z == 0. && want_jump
+			{
+				if jump.want_jump == false
+				{
+					jump.jump_time = state.time();
+					velocity.pos.z += stats.values.jump_strength;
+				}
+			}
+			jump.want_jump = want_jump;
+			if jump.want_jump && state.time() - jump.jump_time < 0.25
+			{
+				affected_by_gravity.factor = 0.05;
+			}
+			else
+			{
+				affected_by_gravity.factor = 1.;
+			}
 		}
 
 		// AI
@@ -434,7 +467,7 @@ impl Map
 					}
 					else
 					{
-						acceleration.pos = Vector2::zeros();
+						acceleration.pos = Vector3::zeros();
 					}
 					if state.time() > ai.next_state_time
 					{
@@ -451,7 +484,7 @@ impl Map
 								let dir_x = rng.gen_range(-1..=1) as f32;
 								let dir_y = rng.gen_range(-1..=1) as f32;
 								acceleration.pos =
-									Vector2::new(dir_x, dir_y) * stats.values.acceleration;
+									Vector3::new(dir_x, dir_y, 0.) * stats.values.acceleration;
 							}
 							_ => (),
 						}
@@ -474,7 +507,7 @@ impl Map
 					{
 						if in_range
 						{
-							acceleration.pos = Vector2::zeros();
+							acceleration.pos = Vector3::zeros();
 							attack.want_attack = true;
 							attack.target_position = target_position.pos;
 							let diff = target_position.pos - position.pos;
@@ -483,8 +516,8 @@ impl Map
 						}
 						else
 						{
-							let diff = (target_position.pos - position.pos).normalize();
-							acceleration.pos = diff * stats.values.acceleration;
+							let diff = (target_position.pos.xy() - position.pos.xy()).normalize();
+							acceleration.pos.set_xy(diff * stats.values.acceleration);
 							attack.want_attack = false;
 						}
 					}
@@ -542,7 +575,7 @@ impl Map
 			{
 				appearance
 					.animation_state
-					.set_new_animation(format!("Move{}", vec_to_dir_name(acceleration.pos)));
+					.set_new_animation(format!("Move{}", vec_to_dir_name(acceleration.pos.xy())));
 				appearance.speed = velocity.pos.norm() / 196.;
 			}
 			else
@@ -552,6 +585,33 @@ impl Map
 					.animation_state
 					.set_new_animation(format!("Stand{}", vec_to_dir_name(dir)));
 				appearance.speed = 1.;
+			}
+		}
+		for (_, (appearance, position, velocity, _affected_by_gravity)) in self
+			.world
+			.query::<(
+				&mut comps::Appearance,
+				&comps::Position,
+				&comps::Velocity,
+				&comps::AffectedByGravity,
+			)>()
+			.iter()
+		{
+			if position.pos.z > 0.
+			{
+				if velocity.pos.z > 0.
+				{
+					appearance
+						.animation_state
+						.set_new_animation(format!("Jump{}", vec_to_dir_name(velocity.pos.xy())));
+				}
+				else
+				{
+					appearance
+						.animation_state
+						.set_new_animation(format!("Fall{}", vec_to_dir_name(velocity.pos.xy())));
+				}
+				appearance.speed = velocity.pos.z.abs() / 196.;
 			}
 		}
 		for (_, (appearance, position, attack)) in self
@@ -593,10 +653,17 @@ impl Map
 					{
 						comps::AttackKind::Fireball =>
 						{
+							// TODO: Spawn position?
 							let pos = position.pos.clone();
 							let time = state.time();
 							spawn_fns.push(move |world: &mut hecs::World| {
-								spawn_fireball(pos, dir * 100., dir * 100., time, world)
+								spawn_fireball(
+									pos + Vector3::new(0., 0., 16.),
+									dir * 100.,
+									dir * 100.,
+									time,
+									world,
+								)
 							});
 						}
 						_ => (),
@@ -609,12 +676,36 @@ impl Map
 			spawn_fn(&mut self.world)?;
 		}
 
-		// Movement.
-		for (_, (acceleration, velocity)) in self
+		for (_, (position, acceleration, affected_by_gravity)) in self
 			.world
-			.query::<(&mut comps::Acceleration, &mut comps::Velocity)>()
+			.query::<(
+				&comps::Position,
+				&mut comps::Acceleration,
+				&comps::AffectedByGravity,
+			)>()
 			.iter()
 		{
+			if position.pos.z <= 0.
+			{
+				continue;
+			}
+			acceleration.pos.z = -affected_by_gravity.factor * 512.;
+		}
+
+		// Velocity.
+		for (_, (position, acceleration, velocity)) in self
+			.world
+			.query::<(
+				&comps::Position,
+				&mut comps::Acceleration,
+				&mut comps::Velocity,
+			)>()
+			.iter()
+		{
+			if position.pos.z > 0.
+			{
+				continue;
+			}
 			let decel = 1024.;
 			if velocity.pos.x.abs() > 0. && acceleration.pos.x == 0.
 			{
@@ -640,25 +731,29 @@ impl Map
 			}
 		}
 
+		// Velocity cap.
 		for (_, (velocity, acceleration, stats)) in self
 			.world
 			.query::<(&mut comps::Velocity, &comps::Acceleration, &comps::Stats)>()
 			.iter()
 		{
 			velocity.pos = velocity.pos + DT * acceleration.pos;
-			if acceleration.pos.norm() > 0.
+			if acceleration.pos.xy().norm() > 0.
 			{
-				let projected_speed = velocity.pos.dot(&acceleration.pos.normalize());
+				let projected_speed = velocity.pos.xy().dot(&acceleration.pos.xy().normalize());
 				if projected_speed > stats.values.speed
 				{
-					velocity.pos *= stats.values.speed / projected_speed;
+					velocity
+						.pos
+						.set_xy(velocity.pos.xy() * stats.values.speed / projected_speed);
 				}
 			}
 		}
 
+		// Position.
 		for (_id, (position, velocity)) in self
 			.world
-			.query::<(&mut comps::Position, &comps::Velocity)>()
+			.query::<(&mut comps::Position, &mut comps::Velocity)>()
 			.iter()
 		{
 			position.pos += DT * velocity.pos;
@@ -719,8 +814,13 @@ impl Map
 
 				let diff = pos2.xy() - pos1.xy();
 				let diff_norm = utils::max(0.1, diff.norm());
+				let diff_z = pos2.z - pos1.z;
 
 				if diff_norm > solid1.size + solid2.size
+				{
+					continue;
+				}
+				if diff_z.abs() > solid1.size + solid2.size
 				{
 					continue;
 				}
@@ -733,17 +833,20 @@ impl Map
 					let f2 = 1. - solid2.mass / (solid2.mass + solid1.mass);
 					if f32::is_finite(f1)
 					{
-						self.world.get::<&mut comps::Position>(id1)?.pos -= diff * f1;
+						let mut position = self.world.get::<&mut comps::Position>(id1)?;
+						position.pos.add_xy(-diff * f1);
 					}
 					if f32::is_finite(f2)
 					{
-						self.world.get::<&mut comps::Position>(id2)?.pos += diff * f2;
+						let mut position = self.world.get::<&mut comps::Position>(id2)?;
+						position.pos.add_xy(diff * f2);
 					}
 				}
 				if pass == 0
 				{
 					for (id, other_id) in [(id1, Some(id2)), (id2, Some(id1))]
 					{
+						// TODO: Remove this .get.
 						if let Ok(on_contact_effect) = self.world.get::<&comps::OnContactEffect>(id)
 						{
 							on_contact_effects.push((
@@ -753,6 +856,22 @@ impl Map
 							));
 						}
 					}
+				}
+			}
+		}
+		// Ground collision.
+		for (id, (position, velocity)) in self
+			.world
+			.query::<(&mut comps::Position, &mut comps::Velocity)>()
+			.iter()
+		{
+			if position.pos.z < 0.
+			{
+				position.pos.z = 0.;
+				velocity.pos.z = 0.;
+				if let Ok(on_contact_effect) = self.world.get::<&comps::OnContactEffect>(id)
+				{
+					on_contact_effects.push((id, None, on_contact_effect.effects.clone()));
 				}
 			}
 		}
@@ -767,6 +886,14 @@ impl Map
 					(comps::ContactEffect::Die, _) => to_die.push((true, id)),
 				}
 			}
+		}
+
+		// Camera
+		if let Ok(position) = self.world.get::<&comps::Position>(self.player)
+		{
+			self.camera_pos.pos += 0.25 * (position.pos - self.camera_pos.pos);
+			// TODO: Think about this.
+			self.camera_lookahead = -0. * (position.pos.xy() - self.camera_pos.pos.xy());
 		}
 
 		// Time to die
@@ -800,12 +927,7 @@ impl Map
 	fn draw(&mut self, state: &game_state::GameState) -> Result<()>
 	{
 		state.core.clear_to_color(Color::from_rgb_f(0.3, 0.3, 0.3));
-
-		if let Ok(pos) = self.world.get::<&comps::Position>(self.player)
-		{
-			self.camera_pos = utils::round_point(pos.draw_pos(state.alpha));
-		}
-		state.core.use_transform(&self.camera_transform(state));
+		let camera_shift = &self.camera_shift(state);
 
 		state
 			.core
@@ -814,7 +936,7 @@ impl Map
 
 		for chunk in self.chunks.iter_mut()
 		{
-			chunk.draw(state)?;
+			chunk.draw(Point2::new(camera_shift.x, camera_shift.y), state)?;
 		}
 
 		let mut appearances = vec![];
@@ -833,7 +955,7 @@ impl Map
 			let sprite = state.get_sprite("data/shadow.cfg")?;
 
 			sprite.draw_frame(
-				utils::round_point(position.draw_pos(state.alpha)),
+				utils::round_point(position.draw_pos(state.alpha).xy() + camera_shift),
 				"Default",
 				0,
 				&state,
@@ -847,6 +969,7 @@ impl Map
 			//);
 		}
 
+		// TODO: Better draw system.
 		state
 			.core
 			.use_shader(Some(&*state.palette_shader.upgrade().unwrap()))
@@ -870,8 +993,10 @@ impl Map
 				.set_shader_sampler("palette", &state.palettes.palette_bitmap, 2)
 				.ok();
 
+			let draw_pos = position.draw_pos(state.alpha);
+			let pos = Point2::new(draw_pos.x, draw_pos.y - draw_pos.z);
 			sprite.draw(
-				utils::round_point(position.draw_pos(state.alpha)),
+				utils::round_point(pos + camera_shift),
 				&appearance.animation_state,
 				&state,
 			);

@@ -1,6 +1,6 @@
 use crate::sprite;
 use allegro::*;
-use na::{Point2, Vector2};
+use na::{Point3, Vector3};
 use nalgebra as na;
 use rand::prelude::*;
 use serde_derive::{Deserialize, Serialize};
@@ -8,14 +8,14 @@ use serde_derive::{Deserialize, Serialize};
 #[derive(Debug, Copy, Clone)]
 pub struct Position
 {
-	pub pos: Point2<f32>,
+	pub pos: Point3<f32>,
 	pub dir: f32,
-	old_pos: Point2<f32>,
+	old_pos: Point3<f32>,
 }
 
 impl Position
 {
-	pub fn new(pos: Point2<f32>) -> Self
+	pub fn new(pos: Point3<f32>) -> Self
 	{
 		Self {
 			pos,
@@ -29,7 +29,7 @@ impl Position
 		self.old_pos = self.pos;
 	}
 
-	pub fn draw_pos(&self, alpha: f32) -> Point2<f32>
+	pub fn draw_pos(&self, alpha: f32) -> Point3<f32>
 	{
 		self.pos + alpha * (self.pos - self.old_pos)
 	}
@@ -38,13 +38,13 @@ impl Position
 #[derive(Debug, Copy, Clone)]
 pub struct Velocity
 {
-	pub pos: Vector2<f32>,
+	pub pos: Vector3<f32>,
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct Acceleration
 {
-	pub pos: Vector2<f32>,
+	pub pos: Vector3<f32>,
 }
 
 #[derive(Debug, Clone)]
@@ -165,6 +165,19 @@ pub struct StatValues
 {
 	pub speed: f32,
 	pub acceleration: f32,
+	pub jump_strength: f32,
+}
+
+impl Default for StatValues
+{
+	fn default() -> Self
+	{
+		Self {
+			speed: 0.,
+			acceleration: 0.,
+			jump_strength: 0.,
+		}
+	}
 }
 
 impl StatValues
@@ -174,6 +187,7 @@ impl StatValues
 		Self {
 			speed: 196.,
 			acceleration: 1024.,
+			jump_strength: 128.,
 		}
 	}
 
@@ -182,6 +196,7 @@ impl StatValues
 		Self {
 			speed: 64.,
 			acceleration: 1024.,
+			..Self::default()
 		}
 	}
 
@@ -190,6 +205,7 @@ impl StatValues
 		Self {
 			speed: 256.,
 			acceleration: 1024.,
+			..Self::default()
 		}
 	}
 }
@@ -223,7 +239,7 @@ pub enum AttackKind
 pub struct Attack
 {
 	pub want_attack: bool,
-	pub target_position: Point2<f32>,
+	pub target_position: Point3<f32>,
 	pub kind: AttackKind,
 }
 
@@ -233,7 +249,7 @@ impl Attack
 	{
 		Self {
 			want_attack: false,
-			target_position: Point2::new(0., 0.),
+			target_position: Point3::new(0., 0., 0.),
 			kind: kind,
 		}
 	}
@@ -262,4 +278,36 @@ pub enum ContactEffect
 pub struct OnContactEffect
 {
 	pub effects: Vec<ContactEffect>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct AffectedByGravity
+{
+	pub factor: f32,
+}
+
+impl AffectedByGravity
+{
+	pub fn new() -> Self
+	{
+		Self { factor: 1. }
+	}
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Jump
+{
+	pub jump_time: f64,
+	pub want_jump: bool,
+}
+
+impl Jump
+{
+	pub fn new() -> Self
+	{
+		Self {
+			jump_time: 0.,
+			want_jump: false,
+		}
+	}
 }

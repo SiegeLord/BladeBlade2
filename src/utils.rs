@@ -120,6 +120,42 @@ pub fn round_point(point: Point2<f32>) -> Point2<f32>
 	Point2::new(point.x.round(), point.y.round())
 }
 
+pub trait XYExt
+{
+	fn set_xy(&mut self, xy: impl std::ops::Index<usize, Output = f32>);
+	fn add_xy(&mut self, xy: impl std::ops::Index<usize, Output = f32>);
+}
+
+impl XYExt for Point3<f32>
+{
+	fn set_xy(&mut self, xy: impl std::ops::Index<usize, Output = f32>)
+	{
+		self.x = xy[0];
+		self.y = xy[1];
+	}
+
+	fn add_xy(&mut self, xy: impl std::ops::Index<usize, Output = f32>)
+	{
+		self.x += xy[0];
+		self.y += xy[1];
+	}
+}
+
+impl XYExt for Vector3<f32>
+{
+	fn set_xy(&mut self, xy: impl std::ops::Index<usize, Output = f32>)
+	{
+		self.x = xy[0];
+		self.y = xy[1];
+	}
+
+	fn add_xy(&mut self, xy: impl std::ops::Index<usize, Output = f32>)
+	{
+		self.x += xy[0];
+		self.y += xy[1];
+	}
+}
+
 pub fn sigmoid(x: f32) -> f32
 {
 	1. / (1. + (-x).exp())

@@ -12,6 +12,7 @@ pub enum Action
 	MoveRight,
 	MoveUp,
 	MoveDown,
+	Jump,
 }
 
 impl Action
@@ -24,6 +25,7 @@ impl Action
 			Action::MoveRight => "MoveRight",
 			Action::MoveUp => "MoveUp",
 			Action::MoveDown => "MoveDown",
+			Action::Jump => "Jump",
 		}
 	}
 }
@@ -498,6 +500,10 @@ impl Controls
 		action_to_inputs.insert(
 			Action::MoveDown,
 			[Some(Input::Keyboard(allegro::KeyCode::S)), None],
+		);
+		action_to_inputs.insert(
+			Action::Jump,
+			[Some(Input::Keyboard(allegro::KeyCode::Space)), None],
 		);
 
 		Self {
