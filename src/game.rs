@@ -345,6 +345,7 @@ impl Map
 			let idle_time = 3.;
 			let wander_time = 0.5;
 			let chase_time = 1.;
+			let attack_time = 1.;
 			let acceleration_amount = 64.;
 			let sense_range = 128.;
 
@@ -370,26 +371,48 @@ impl Map
 				}
 			}
 
+			let mut next_state = None;
 			match ai.state
 			{
 				comps::AIState::Idle =>
 				{
 					if let Some(target) = target
 					{
-						ai.state = comps::AIState::Chase(target);
-						ai.next_state_time = state.time() + chase_time;
+						next_state = Some(comps::AIState::Chase(target));
 					}
 					else
 					{
 						acceleration.pos = Vector2::zeros();
+					}
+					if state.time() > ai.next_state_time
+					{
+						let next_state_weight =
+							[(comps::AIState::Idle, 1), (comps::AIState::Wander, 1)];
+						next_state = next_state_weight
+							.choose_weighted(&mut rng, |sw| sw.1)
+							.ok()
+							.map(|sw| sw.0);
+						match ai.state
+						{
+							comps::AIState::Wander =>
+							{
+								let dir_x = rng.gen_range(-1..=1) as f32;
+								let dir_y = rng.gen_range(-1..=1) as f32;
+								acceleration.pos = Vector2::new(dir_x, dir_y) * acceleration_amount;
+							}
+							_ => (),
+						}
 					}
 				}
 				comps::AIState::Wander =>
 				{
 					if let Some(target) = target
 					{
-						ai.state = comps::AIState::Chase(target);
-						ai.next_state_time = state.time() + chase_time;
+						next_state = Some(comps::AIState::Chase(target));
+					}
+					if state.time() > ai.next_state_time
+					{
+						next_state = Some(comps::AIState::Idle);
 					}
 				}
 				comps::AIState::Chase(_) =>
@@ -399,54 +422,42 @@ impl Map
 						let diff = (target_position.pos - position.pos).normalize();
 						acceleration.pos = diff * acceleration_amount;
 					}
+					if state.time() > ai.next_state_time
+					{
+						if let Some(target) = target
+						{
+							next_state = Some(comps::AIState::Chase(target));
+						}
+						else
+						{
+							next_state = Some(comps::AIState::Idle);
+						}
+					}
 				}
 				_ => (),
 			}
-			if state.time() < ai.next_state_time
+			if let Some(next_state) = next_state
 			{
-				continue;
-			}
-
-			match ai.state
-			{
-				comps::AIState::Idle =>
+				match next_state
 				{
-					let next_state = [(comps::AIState::Idle, 1), (comps::AIState::Wander, 1)];
-					ai.state = next_state.choose_weighted(&mut rng, |sw| sw.1).unwrap().0;
-					match ai.state
+					comps::AIState::Idle =>
 					{
-						comps::AIState::Idle =>
-						{
-							ai.next_state_time = state.time() + idle_time;
-						}
-						comps::AIState::Wander =>
-						{
-							ai.next_state_time = state.time() + wander_time;
-							let dir_x = rng.gen_range(-1..=1) as f32;
-							let dir_y = rng.gen_range(-1..=1) as f32;
-							acceleration.pos = Vector2::new(dir_x, dir_y) * acceleration_amount;
-						}
-						_ => (),
-					}
-				}
-				comps::AIState::Wander =>
-				{
-					ai.state = comps::AIState::Idle;
-					ai.next_state_time = state.time() + idle_time;
-				}
-				comps::AIState::Chase(_) =>
-				{
-					if target.is_none()
-					{
-						ai.state = comps::AIState::Idle;
 						ai.next_state_time = state.time() + idle_time;
 					}
-					else
+					comps::AIState::Wander =>
+					{
+						ai.next_state_time = state.time() + wander_time;
+					}
+					comps::AIState::Chase(_) =>
 					{
 						ai.next_state_time = state.time() + chase_time;
 					}
+					comps::AIState::Attack(_) =>
+					{
+						ai.next_state_time = state.time() + attack_time;
+					}
 				}
-				_ => (),
+				ai.state = next_state;
 			}
 		}
 
