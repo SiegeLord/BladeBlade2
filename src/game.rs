@@ -307,9 +307,9 @@ impl Map
 
 		let player = spawn_player(spawn_pos, &mut world)?;
 
-		for i in 0..1
+		for i in 0..3
 		{
-			for j in 0..1
+			for j in 0..3
 			{
 				spawn_enemy(
 					Point2::new(200. + i as f32 * 32., 200. + j as f32 * 32.),
@@ -385,26 +385,24 @@ impl Map
 			let wander_time = 0.5;
 			let chase_time = 1.;
 			let attack_time = 1.;
-			let sense_range = 96.;
-			let attack_range = 64.;
+			let sense_range = 104.;
+			let attack_range = 96.;
 
 			// TODO: Better target acquisition.
-			let mut target;
+			let mut target = None;
 			if let Some(cur_target) = ai.state.get_target()
 			{
 				target = Some(cur_target);
 			}
 			else
 			{
-				target = Some(self.player);
-				let target_position =
-					target.and_then(|target| self.world.get::<&comps::Position>(target).ok());
-				if let Some(target_position) = target_position.as_ref()
+				let target_position = self.world.get::<&comps::Position>(self.player).ok();
+				if let Some(target_position) = target_position
 				{
 					let dist = (target_position.pos - position.pos).norm();
-					if dist > sense_range
+					if dist < sense_range && rng.gen_bool(0.9)
 					{
-						target = None;
+						target = Some(self.player);
 					}
 				}
 			}
