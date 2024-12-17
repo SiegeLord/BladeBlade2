@@ -321,6 +321,7 @@ fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entit
 		comps::AffectedByGravity::new(),
 		comps::BladeBlade::new(),
 		comps::CastsShadow,
+		comps::Controller::new(),
 	));
 	Ok(entity)
 }
@@ -347,6 +348,7 @@ fn spawn_enemy(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity
 		comps::Stats::new(comps::StatValues::new_enemy()),
 		comps::Attack::new(comps::AttackKind::Fireball),
 		comps::CastsShadow,
+		comps::Controller::new(),
 	));
 	Ok(entity)
 }
@@ -643,67 +645,46 @@ impl Map
 		}
 		self.camera_pos.snapshot();
 
-		// Input.
-		if let Ok((position, acceleration, stats)) =
-			self.world
-				.query_one_mut::<(&comps::Position, &mut comps::Acceleration, &comps::Stats)>(
-					self.player,
-				)
+		// Stats.
+		for (_, stats) in self.world.query::<&mut comps::Stats>().iter()
 		{
+			stats.reset();
+		}
+		for (_, (stats, attack)) in self
+			.world
+			.query::<(&mut comps::Stats, &comps::Attack)>()
+			.iter()
+		{
+			if attack.want_attack
+			{
+				stats.values.acceleration = 0.;
+				stats.values.jump_strength = 0.;
+			}
+		}
+
+		// Input.
+		if let Ok(controller) = self
+			.world
+			.query_one_mut::<&mut comps::Controller>(self.player)
+		{
+			controller.want_attack = state
+				.controls
+				.get_action_state(controls::Action::BladeBlade)
+				> 0.5;
+
 			let dx = state.controls.get_action_state(controls::Action::MoveRight)
 				- state.controls.get_action_state(controls::Action::MoveLeft);
 			let dy = state.controls.get_action_state(controls::Action::MoveDown)
 				- state.controls.get_action_state(controls::Action::MoveUp);
-
-			let mut air_control = 0.5;
-			if position.pos.z == 0.
-			{
-				air_control = 1.;
-			}
-			acceleration.pos = Vector3::new(dx, dy, 0.) * air_control * stats.values.acceleration;
-		}
-
-		if let Ok((position, velocity, stats, jump, affected_by_gravity)) =
-			self.world.query_one_mut::<(
-				&comps::Position,
-				&mut comps::Velocity,
-				&comps::Stats,
-				&mut comps::Jump,
-				&mut comps::AffectedByGravity,
-			)>(self.player)
-		{
-			let want_jump = state.controls.get_action_state(controls::Action::Jump) > 0.5;
-			if position.pos.z == 0. && want_jump
-			{
-				//self.show_depth = !self.show_depth;
-				if jump.want_jump == false
-				{
-					jump.jump_time = state.time();
-					velocity.pos.z += stats.values.jump_strength;
-				}
-			}
-			jump.want_jump = want_jump;
-			if jump.want_jump && state.time() - jump.jump_time < 0.25
-			{
-				affected_by_gravity.factor = 0.05;
-			}
-			else
-			{
-				affected_by_gravity.factor = 1.;
-			}
+			controller.want_move = Vector2::new(dx, dy);
+			controller.want_jump = state.controls.get_action_state(controls::Action::Jump) > 0.5;
 		}
 
 		// AI
 		let mut rng = thread_rng();
-		for (_, (position, acceleration, ai, stats, attack)) in self
+		for (_, (position, ai, controller)) in self
 			.world
-			.query::<(
-				&mut comps::Position,
-				&mut comps::Acceleration,
-				&mut comps::AI,
-				&comps::Stats,
-				&mut comps::Attack,
-			)>()
+			.query::<(&mut comps::Position, &mut comps::AI, &mut comps::Controller)>()
 			.iter()
 		{
 			let idle_time = 3.;
@@ -759,7 +740,7 @@ impl Map
 					}
 					else
 					{
-						acceleration.pos = Vector3::zeros();
+						controller.want_move = Vector2::zeros();
 					}
 					if state.time() > ai.next_state_time
 					{
@@ -775,8 +756,7 @@ impl Map
 							{
 								let dir_x = rng.gen_range(-1..=1) as f32;
 								let dir_y = rng.gen_range(-1..=1) as f32;
-								acceleration.pos =
-									Vector3::new(dir_x, dir_y, 0.) * stats.values.acceleration;
+								controller.want_move = Vector2::new(dir_x, dir_y);
 							}
 							_ => (),
 						}
@@ -799,9 +779,9 @@ impl Map
 					{
 						if in_range
 						{
-							acceleration.pos = Vector3::zeros();
-							attack.want_attack = true;
-							attack.target_position = target_position.pos;
+							controller.want_move = Vector2::zeros();
+							controller.want_attack = true;
+							controller.target_position = target_position.pos;
 							let diff = target_position.pos - position.pos;
 							position.dir = diff.y.atan2(diff.x);
 							next_state = Some(comps::AIState::Chase(cur_target));
@@ -809,8 +789,8 @@ impl Map
 						else
 						{
 							let diff = (target_position.pos.xy() - position.pos.xy()).normalize();
-							acceleration.pos.set_xy(diff * stats.values.acceleration);
-							attack.want_attack = false;
+							controller.want_move = diff;
+							controller.want_attack = false;
 						}
 					}
 					if state.time() > ai.next_state_time
@@ -849,6 +829,68 @@ impl Map
 					}
 				}
 				ai.state = next_state;
+			}
+		}
+
+		// Controller.
+		for (_, (position, acceleration, stats, controller)) in self
+			.world
+			.query::<(
+				&comps::Position,
+				&mut comps::Acceleration,
+				&comps::Stats,
+				&comps::Controller,
+			)>()
+			.iter()
+		{
+			let want_move = controller.want_move;
+			let mut air_control = 0.5;
+			if position.pos.z == 0.
+			{
+				air_control = 1.;
+			}
+			acceleration.pos = Vector3::new(want_move.x, want_move.y, 0.)
+				* air_control
+				* stats.values.acceleration;
+		}
+
+		for (_, (position, velocity, stats, jump, affected_by_gravity, controller)) in self
+			.world
+			.query::<(
+				&comps::Position,
+				&mut comps::Velocity,
+				&comps::Stats,
+				&mut comps::Jump,
+				&mut comps::AffectedByGravity,
+				&comps::Controller,
+			)>()
+			.iter()
+		{
+			let want_jump = controller.want_jump;
+			if position.pos.z == 0. && want_jump
+			{
+				//self.show_depth = !self.show_depth;
+				jump.jump_time = state.time();
+				velocity.pos.z += stats.values.jump_strength;
+			}
+			if want_jump && state.time() - jump.jump_time < 0.25
+			{
+				affected_by_gravity.factor = 0.05;
+			}
+			else
+			{
+				affected_by_gravity.factor = 1.;
+			}
+		}
+		for (_, (attack, controller)) in self
+			.world
+			.query::<(&mut comps::Attack, &comps::Controller)>()
+			.iter()
+		{
+			if controller.want_attack
+			{
+				attack.want_attack = true;
+				attack.target_position = controller.target_position;
 			}
 		}
 
@@ -891,17 +933,25 @@ impl Map
 		{
 			if position.pos.z > 0.
 			{
+				let dir = if velocity.pos.xy().norm() > 0.
+				{
+					velocity.pos.xy()
+				}
+				else
+				{
+					Vector2::new(position.dir.cos(), position.dir.sin())
+				};
 				if velocity.pos.z > 0.
 				{
 					appearance
 						.animation_state
-						.set_new_animation(format!("Jump{}", vec_to_dir_name(velocity.pos.xy())));
+						.set_new_animation(format!("Jump{}", vec_to_dir_name(dir)));
 				}
 				else
 				{
 					appearance
 						.animation_state
-						.set_new_animation(format!("Fall{}", vec_to_dir_name(velocity.pos.xy())));
+						.set_new_animation(format!("Fall{}", vec_to_dir_name(dir)));
 				}
 				appearance.speed = velocity.pos.z.abs() / 196.;
 			}
@@ -917,7 +967,7 @@ impl Map
 				appearance
 					.animation_state
 					.set_new_animation(format!("Attack{}", vec_to_dir_name(dir)));
-				appearance.speed = 1.;
+				appearance.speed = 1.; // TODO: cast speed
 			}
 		}
 		for (_, appearance) in self.world.query::<&mut comps::Appearance>().iter()
@@ -931,9 +981,15 @@ impl Map
 
 		// Attacking.
 		let mut spawn_fns: Vec<Box<dyn FnOnce(&mut hecs::World) -> Result<hecs::Entity>>> = vec![];
-		for (_, (appearance, position, attack)) in self
+		let mut blade_blade_activations = vec![];
+		for (id, (appearance, position, attack, stats)) in self
 			.world
-			.query::<(&mut comps::Appearance, &comps::Position, &comps::Attack)>()
+			.query::<(
+				&mut comps::Appearance,
+				&comps::Position,
+				&mut comps::Attack,
+				&comps::Stats,
+			)>()
 			.iter()
 		{
 			if attack.want_attack
@@ -958,9 +1014,41 @@ impl Map
 								)
 							}));
 						}
-						_ => (),
+						comps::AttackKind::BladeBlade =>
+						{
+							blade_blade_activations.push((id, stats.values.skill_duration));
+						}
 					}
 				}
+				if appearance.animation_state.drain_loops() > 0
+				{
+					attack.want_attack = false;
+				}
+			}
+		}
+		for (id, skill_duration) in blade_blade_activations
+		{
+			if let Ok(blade_blade) = self.world.query_one_mut::<&mut comps::BladeBlade>(id)
+			{
+				blade_blade.time_to_remove = state.time() + skill_duration as f64;
+				blade_blade.num_blades = utils::min(10, blade_blade.num_blades + 1);
+			}
+		}
+
+		// BladeBlade
+		for (_, (position, blade_blade, stats)) in self
+			.world
+			.query::<(&comps::Position, &mut comps::BladeBlade, &comps::Stats)>()
+			.iter()
+		{
+			if state.time() > blade_blade.time_to_remove
+			{
+				blade_blade.num_blades = utils::max(0, blade_blade.num_blades - 1);
+				blade_blade.time_to_remove = state.time() + stats.values.skill_duration as f64;
+			}
+			if state.time() > blade_blade.time_to_hit && blade_blade.num_blades > 0
+			{
+				blade_blade.time_to_hit = state.time() + 0.5 / blade_blade.num_blades as f64;
 			}
 		}
 
@@ -1059,7 +1147,7 @@ impl Map
 			.iter()
 		{
 			position.pos += DT * velocity.pos;
-			if velocity.pos.norm() > 0.
+			if velocity.pos.xy().norm() > 0.
 			{
 				position.dir = velocity.pos.y.atan2(velocity.pos.x);
 			}

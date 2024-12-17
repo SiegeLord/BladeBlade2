@@ -13,6 +13,7 @@ pub enum Action
 	MoveUp,
 	MoveDown,
 	Jump,
+	BladeBlade,
 }
 
 impl Action
@@ -21,11 +22,12 @@ impl Action
 	{
 		match self
 		{
-			Action::MoveLeft => "MoveLeft",
-			Action::MoveRight => "MoveRight",
-			Action::MoveUp => "MoveUp",
-			Action::MoveDown => "MoveDown",
+			Action::MoveLeft => "Move Left",
+			Action::MoveRight => "Move Right",
+			Action::MoveUp => "Move Up",
+			Action::MoveDown => "Move Down",
 			Action::Jump => "Jump",
+			Action::BladeBlade => "BladeBlade",
 		}
 	}
 }
@@ -487,23 +489,42 @@ impl Controls
 		let mut action_to_inputs = BTreeMap::new();
 		action_to_inputs.insert(
 			Action::MoveUp,
-			[Some(Input::Keyboard(allegro::KeyCode::W)), None],
+			[
+				Some(Input::Keyboard(allegro::KeyCode::W)),
+				Some(Input::Keyboard(allegro::KeyCode::Up)),
+			],
 		);
 		action_to_inputs.insert(
 			Action::MoveLeft,
-			[Some(Input::Keyboard(allegro::KeyCode::A)), None],
+			[
+				Some(Input::Keyboard(allegro::KeyCode::A)),
+				Some(Input::Keyboard(allegro::KeyCode::Left)),
+			],
 		);
 		action_to_inputs.insert(
 			Action::MoveRight,
-			[Some(Input::Keyboard(allegro::KeyCode::D)), None],
+			[
+				Some(Input::Keyboard(allegro::KeyCode::D)),
+				Some(Input::Keyboard(allegro::KeyCode::Right)),
+			],
 		);
 		action_to_inputs.insert(
 			Action::MoveDown,
-			[Some(Input::Keyboard(allegro::KeyCode::S)), None],
+			[
+				Some(Input::Keyboard(allegro::KeyCode::S)),
+				Some(Input::Keyboard(allegro::KeyCode::Down)),
+			],
 		);
 		action_to_inputs.insert(
 			Action::Jump,
 			[Some(Input::Keyboard(allegro::KeyCode::Space)), None],
+		);
+		action_to_inputs.insert(
+			Action::BladeBlade,
+			[
+				Some(Input::Keyboard(allegro::KeyCode::Enter)),
+				Some(Input::Keyboard(allegro::KeyCode::LCtrl)),
+			],
 		);
 
 		Self {

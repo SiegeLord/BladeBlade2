@@ -1,6 +1,8 @@
+options.cfg
 game.log
 allegro5.cfg
 target
 data/raw
+/*.mp4
 /*.png
 /*.jpg

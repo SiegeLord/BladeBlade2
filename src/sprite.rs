@@ -217,6 +217,10 @@ impl Sprite
 			{
 				state.num_activations += 1;
 			}
+			if state.frame_idx == animation_desc.frames.len() as i32 - 1
+			{
+				state.num_loops += 1;
+			}
 		}
 	}
 }
@@ -229,6 +233,7 @@ pub struct AnimationState
 	frame_progress: f64,
 	frame_idx: i32,
 	num_activations: i32,
+	num_loops: i32,
 }
 
 impl AnimationState
@@ -241,6 +246,7 @@ impl AnimationState
 			frame_progress: 0.,
 			frame_idx: 0,
 			num_activations: 0,
+			num_loops: 0,
 		}
 	}
 
@@ -253,6 +259,13 @@ impl AnimationState
 	{
 		let res = self.num_activations;
 		self.num_activations = 0;
+		res
+	}
+
+	pub fn drain_loops(&mut self) -> i32
+	{
+		let res = self.num_loops;
+		self.num_loops = 0;
 		res
 	}
 }

@@ -1,7 +1,7 @@
 use crate::error::Result;
 use crate::sprite;
 use allegro::*;
-use na::{Point3, Vector3};
+use na::{Point3, Vector2, Vector3};
 use nalgebra as na;
 use rand::prelude::*;
 use serde_derive::{Deserialize, Serialize};
@@ -180,6 +180,7 @@ pub struct StatValues
 	pub acceleration: f32,
 	pub jump_strength: f32,
 	pub area_of_effect: f32,
+	pub skill_duration: f32,
 }
 
 impl Default for StatValues
@@ -191,6 +192,7 @@ impl Default for StatValues
 			acceleration: 0.,
 			jump_strength: 0.,
 			area_of_effect: 0.,
+			skill_duration: 0.,
 		}
 	}
 }
@@ -204,6 +206,7 @@ impl StatValues
 			acceleration: 1024.,
 			jump_strength: 128.,
 			area_of_effect: 32. * 32.,
+			skill_duration: 1.,
 			..Self::default()
 		}
 	}
@@ -213,6 +216,7 @@ impl StatValues
 		Self {
 			speed: 64.,
 			acceleration: 1024.,
+			skill_duration: 0.25,
 			..Self::default()
 		}
 	}
@@ -242,6 +246,11 @@ impl Stats
 			base_values: base_values,
 			values: base_values,
 		}
+	}
+
+	pub fn reset(&mut self)
+	{
+		self.values = self.base_values;
 	}
 }
 
@@ -322,17 +331,13 @@ impl AffectedByGravity
 pub struct Jump
 {
 	pub jump_time: f64,
-	pub want_jump: bool,
 }
 
 impl Jump
 {
 	pub fn new() -> Self
 	{
-		Self {
-			jump_time: 0.,
-			want_jump: false,
-		}
+		Self { jump_time: 0. }
 	}
 }
 
@@ -342,7 +347,6 @@ pub struct DieOnActivation;
 pub struct BladeBlade
 {
 	pub num_blades: i32,
-	pub time_to_add: f64,
 	pub time_to_remove: f64,
 	pub time_to_hit: f64,
 }
@@ -352,8 +356,7 @@ impl BladeBlade
 	pub fn new() -> Self
 	{
 		Self {
-			num_blades: 10,
-			time_to_add: 0.,
+			num_blades: 0,
 			time_to_remove: 0.,
 			time_to_hit: 0.,
 		}
@@ -362,3 +365,25 @@ impl BladeBlade
 
 #[derive(Debug, Copy, Clone)]
 pub struct CastsShadow;
+
+#[derive(Debug, Copy, Clone)]
+pub struct Controller
+{
+	pub want_attack: bool,
+	pub want_jump: bool,
+	pub want_move: Vector2<f32>,
+	pub target_position: Point3<f32>,
+}
+
+impl Controller
+{
+	pub fn new() -> Self
+	{
+		Self {
+			want_attack: false,
+			want_jump: false,
+			want_move: Vector2::zeros(),
+			target_position: Point3::new(0., 0., 0.),
+		}
+	}
+}
