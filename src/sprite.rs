@@ -1,7 +1,7 @@
 use crate::error::Result;
 use crate::{atlas, game_state, palette, utils};
 use allegro::*;
-use na::Point2;
+use na::{Point2, Vector2};
 use nalgebra as na;
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -140,7 +140,7 @@ impl Sprite
 		&self.desc.palettes
 	}
 
-	pub fn draw(
+	pub fn draw_frame_from_state(
 		&self, pos: Point2<f32>, animation_state: &AnimationState, state: &game_state::GameState,
 	)
 	{
@@ -168,10 +168,35 @@ impl Sprite
 			atlas_bmp.start.y,
 			w,
 			h,
-			pos.x.floor() - w / 2. - self.desc.center_offt_x as f32,
-			pos.y.floor() - h / 2. - self.desc.center_offt_y as f32,
+			pos.x - w / 2. - self.desc.center_offt_x as f32,
+			pos.y - h / 2. - self.desc.center_offt_y as f32,
 			Flag::zero(),
 		);
+	}
+
+	pub fn get_frame_from_state(
+		&self, animation_state: &AnimationState,
+	) -> (atlas::AtlasBitmap, Vector2<f32>)
+	{
+		self.get_frame(&animation_state.animation_name, animation_state.frame_idx)
+	}
+
+	pub fn get_frame(
+		&self, animation_name: &str, frame_idx: i32,
+	) -> (atlas::AtlasBitmap, Vector2<f32>)
+	{
+		let w = self.desc.width as f32;
+		let h = self.desc.height as f32;
+		let animation = &self.animations[animation_name];
+		let atlas_bmp = &animation.frames[frame_idx as usize];
+
+		(
+			*atlas_bmp,
+			Vector2::new(
+				-w / 2. - self.desc.center_offt_x as f32,
+				-h / 2. - self.desc.center_offt_y as f32,
+			),
+		)
 	}
 
 	pub fn advance_state(&self, state: &mut AnimationState, amount: f64)

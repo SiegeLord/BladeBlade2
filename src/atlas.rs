@@ -7,7 +7,7 @@ use nalgebra::Point2;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct AtlasBitmap
 {
 	pub start: Point2<f32>,

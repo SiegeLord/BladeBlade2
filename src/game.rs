@@ -1,9 +1,12 @@
 use crate::components::Velocity;
 use crate::error::Result;
 use crate::utils::{XYExt, DT};
-use crate::{astar, components as comps, controls, game_state, spatial_grid, sprite, ui, utils};
+use crate::{
+	astar, atlas, components as comps, controls, game_state, spatial_grid, sprite, ui, utils,
+};
 use allegro::*;
 use allegro_font::*;
+use allegro_primitives::*;
 use na::{
 	Isometry3, Matrix4, Perspective3, Point2, Point3, Quaternion, RealField, Rotation2, Rotation3,
 	Unit, Vector2, Vector3, Vector4,
@@ -29,7 +32,9 @@ impl Game
 	{
 		state.cache_sprite("data/player_anim.cfg")?;
 		state.cache_sprite("data/fireball_anim.cfg")?;
+		state.cache_sprite("data/fire_hit_anim.cfg")?;
 		state.cache_sprite("data/shadow.cfg")?;
+		state.cache_sprite("data/terrain.cfg")?;
 
 		Ok(Self {
 			map: Map::new(state)?,
@@ -139,7 +144,161 @@ impl Game
 	}
 }
 
-pub fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
+#[derive(Copy, Clone, Debug)]
+#[repr(C)]
+pub struct BladeVertex
+{
+	x: f32,
+	y: f32,
+	z: f32,
+	u: f32,
+	v: f32,
+	palette_index: f32,
+	material: f32,
+	color: Color,
+}
+
+unsafe impl VertexType for BladeVertex
+{
+	fn get_decl(prim: &PrimitivesAddon) -> VertexDecl
+	{
+		fn make_builder() -> std::result::Result<VertexDeclBuilder, ()>
+		{
+			VertexDeclBuilder::new(std::mem::size_of::<BladeVertex>())
+				.pos(
+					VertexAttrStorage::F32_3,
+					memoffset::offset_of!(BladeVertex, x),
+				)?
+				.uv(
+					VertexAttrStorage::F32_2,
+					memoffset::offset_of!(BladeVertex, u),
+				)?
+				.color(memoffset::offset_of!(BladeVertex, color))?
+				.user_attr(
+					VertexAttrStorage::F32_2,
+					memoffset::offset_of!(BladeVertex, palette_index),
+				)
+		}
+
+		VertexDecl::from_builder(prim, &make_builder().unwrap())
+	}
+}
+
+struct Bucket
+{
+	vertices: Vec<BladeVertex>,
+	indices: Vec<i32>,
+}
+
+struct Scene
+{
+	buckets: Vec<Bucket>,
+}
+
+impl Scene
+{
+	fn new() -> Self
+	{
+		Scene { buckets: vec![] }
+	}
+
+	fn ensure_bucket(&mut self, page: usize)
+	{
+		while page >= self.buckets.len()
+		{
+			self.buckets.push(Bucket {
+				vertices: vec![],
+				indices: vec![],
+			});
+		}
+	}
+
+	fn add_vertices(&mut self, vertices: &[BladeVertex], page: usize)
+	{
+		self.ensure_bucket(page);
+		self.buckets[page].vertices.extend(vertices);
+	}
+
+	fn add_indices(&mut self, indices: &[i32], page: usize)
+	{
+		self.ensure_bucket(page);
+		self.buckets[page].indices.extend(indices);
+	}
+
+	fn add_vertex(&mut self, vertex: BladeVertex, page: usize)
+	{
+		self.ensure_bucket(page);
+		self.buckets[page].vertices.push(vertex);
+	}
+
+	fn add_index(&mut self, index: i32, page: usize)
+	{
+		self.ensure_bucket(page);
+		self.buckets[page].indices.push(index);
+	}
+
+	fn num_vertices(&mut self, page: usize) -> i32
+	{
+		self.ensure_bucket(page);
+		self.buckets[page].vertices.len() as i32
+	}
+
+	fn add_bitmap(
+		&mut self, pos: Point3<f32>, bmp: atlas::AtlasBitmap, palette_index: i32, material: i32,
+	)
+	{
+		let color = Color::from_rgb_f(1., 1., 1.);
+		let page_size = 1024.;
+		let vertices = [
+			BladeVertex {
+				x: pos.x,
+				y: pos.y,
+				z: pos.z,
+				u: bmp.start.x / page_size,
+				v: 1. - bmp.start.y / page_size,
+				color: color,
+				palette_index: palette_index as f32,
+				material: material as f32,
+			},
+			BladeVertex {
+				x: pos.x + bmp.width(),
+				y: pos.y,
+				z: pos.z,
+				u: bmp.end.x / page_size,
+				v: 1. - bmp.start.y / page_size,
+				color: color,
+				palette_index: palette_index as f32,
+				material: material as f32,
+			},
+			BladeVertex {
+				x: pos.x + bmp.width(),
+				y: pos.y + bmp.height(),
+				z: pos.z,
+				u: bmp.end.x / page_size,
+				v: 1. - bmp.end.y / page_size,
+				color: color,
+				palette_index: palette_index as f32,
+				material: material as f32,
+			},
+			BladeVertex {
+				x: pos.x,
+				y: pos.y + bmp.height(),
+				z: pos.z,
+				u: bmp.start.x / page_size,
+				v: 1. - bmp.end.y / page_size,
+				color: color,
+				palette_index: palette_index as f32,
+				material: material as f32,
+			},
+		];
+		let idx = self.num_vertices(bmp.page);
+		let indices = [idx + 0, idx + 1, idx + 2, idx + 0, idx + 2, idx + 3];
+		self.add_indices(&indices[..], bmp.page);
+		self.add_vertices(&vertices[..], bmp.page);
+	}
+}
+
+fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
 {
 	let entity = world.spawn((
 		comps::Appearance::new("data/player_anim.cfg"),
@@ -163,7 +322,7 @@ pub fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::E
 	Ok(entity)
 }
 
-pub fn spawn_enemy(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
+fn spawn_enemy(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
 {
 	let mut appearance = comps::Appearance::new("data/player_anim.cfg");
 	appearance.palette = Some("data/player_pal2.png".to_string());
@@ -188,7 +347,7 @@ pub fn spawn_enemy(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::En
 	Ok(entity)
 }
 
-pub fn spawn_fireball(
+fn spawn_fireball(
 	pos: Point3<f32>, velocity_pos: Vector3<f32>, acceleration_pos: Vector3<f32>, time: f64,
 	world: &mut hecs::World,
 ) -> Result<hecs::Entity>
@@ -208,8 +367,23 @@ pub fn spawn_fireball(
 		comps::Stats::new(comps::StatValues::new_fireball()),
 		comps::TimeToDie::new(time + 1.),
 		comps::OnContactEffect {
-			effects: vec![comps::ContactEffect::Die],
+			effects: vec![comps::Effect::Die, comps::Effect::SpawnFireHit],
 		},
+		comps::OnDeathEffect {
+			effects: vec![comps::Effect::SpawnFireHit],
+		},
+	));
+	Ok(entity)
+}
+
+fn spawn_fire_hit(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
+{
+	let mut appearance = comps::Appearance::new("data/fire_hit_anim.cfg");
+	appearance.bias = 1;
+	let entity = world.spawn((
+		appearance,
+		comps::Position::new(pos),
+		comps::DieOnActivation,
 	));
 	Ok(entity)
 }
@@ -290,21 +464,32 @@ impl MapChunk
 		})
 	}
 
-	fn draw(&self, pos: Point2<f32>, state: &game_state::GameState) -> Result<()>
+	fn draw(
+		&self, pos: Point2<f32>, scene: &mut Scene, z_shift: f32, state: &game_state::GameState,
+	) -> Result<()>
 	{
 		let sprite = state.get_sprite("data/terrain.cfg")?;
+		let palette_index = state
+			.palettes
+			.get_palette_index(&sprite.get_palettes()[0])?;
 		for y in 0..self.height
 		{
 			for x in 0..self.width
 			{
 				let tile_idx = self.tiles[y as usize * self.height as usize + x as usize];
-				sprite.draw_frame(
-					utils::round_point(
-						pos + Vector2::new(x as f32 * TILE_SIZE, y as f32 * TILE_SIZE),
-					),
-					"Default",
-					tile_idx,
-					state,
+				if tile_idx == 0
+				{
+					continue;
+				}
+				let (atlas_bmp, offt) = sprite.get_frame("Default", tile_idx);
+
+				let tile_pos = Vector2::new(x as f32 * TILE_SIZE, y as f32 * TILE_SIZE);
+				let pos = utils::round_point(pos + tile_pos) + offt;
+				scene.add_bitmap(
+					Point3::new(pos.x, pos.y, tile_pos.y + z_shift),
+					atlas_bmp,
+					palette_index,
+					0,
 				);
 			}
 		}
@@ -395,11 +580,12 @@ struct Map
 	chunks: Vec<MapChunk>,
 	camera_pos: comps::Position,
 	camera_lookahead: Vector2<f32>,
+	show_depth: bool,
 }
 
 impl Map
 {
-	fn new(state: &mut game_state::GameState) -> Result<Self>
+	fn new(_state: &mut game_state::GameState) -> Result<Self>
 	{
 		let mut world = hecs::World::new();
 
@@ -418,14 +604,13 @@ impl Map
 			}
 		}
 
-		state.cache_sprite("data/terrain.cfg")?;
-
 		Ok(Self {
 			world: world,
 			player: player,
 			chunks: vec![MapChunk::new("data/test.tmx")?],
 			camera_pos: comps::Position::new(spawn_pos),
 			camera_lookahead: Vector2::zeros(),
+			show_depth: false,
 		})
 	}
 
@@ -485,6 +670,7 @@ impl Map
 			let want_jump = state.controls.get_action_state(controls::Action::Jump) > 0.5;
 			if position.pos.z == 0. && want_jump
 			{
+				//self.show_depth = !self.show_depth;
 				if jump.want_jump == false
 				{
 					jump.jump_time = state.time();
@@ -739,7 +925,7 @@ impl Map
 		}
 
 		// Attacking.
-		let mut spawn_fns = vec![];
+		let mut spawn_fns: Vec<Box<dyn FnOnce(&mut hecs::World) -> Result<hecs::Entity>>> = vec![];
 		for (_, (appearance, position, attack)) in self
 			.world
 			.query::<(&mut comps::Appearance, &comps::Position, &comps::Attack)>()
@@ -757,7 +943,7 @@ impl Map
 							// TODO: Spawn position?
 							let pos = position.pos.clone();
 							let time = state.time();
-							spawn_fns.push(move |world: &mut hecs::World| {
+							spawn_fns.push(Box::new(move |world: &mut hecs::World| {
 								spawn_fireball(
 									pos + Vector3::new(0., 0., 16.),
 									dir * 100.,
@@ -765,16 +951,24 @@ impl Map
 									time,
 									world,
 								)
-							});
+							}));
 						}
 						_ => (),
 					}
 				}
 			}
 		}
-		for spawn_fn in spawn_fns
+
+		// Die on activation.
+		for (id, (_, appearance)) in self
+			.world
+			.query::<(&comps::DieOnActivation, &mut comps::Appearance)>()
+			.iter()
 		{
-			spawn_fn(&mut self.world)?;
+			if appearance.animation_state.drain_activations() > 0
+			{
+				to_die.push((true, id));
+			}
 		}
 
 		// Gravity.
@@ -900,7 +1094,7 @@ impl Map
 			colliding_pairs.push((a.inner, b.inner));
 		}
 
-		let mut on_contact_effects = vec![];
+		let mut effects = vec![];
 		for pass in 0..5
 		{
 			for &(inner1, inner2) in &colliding_pairs
@@ -950,11 +1144,7 @@ impl Map
 						// TODO: Remove this .get.
 						if let Ok(on_contact_effect) = self.world.get::<&comps::OnContactEffect>(id)
 						{
-							on_contact_effects.push((
-								id,
-								other_id,
-								on_contact_effect.effects.clone(),
-							));
+							effects.push((id, other_id, on_contact_effect.effects.clone()));
 						}
 					}
 				}
@@ -998,20 +1188,8 @@ impl Map
 					}
 					if let Ok(on_contact_effect) = self.world.get::<&comps::OnContactEffect>(id)
 					{
-						on_contact_effects.push((id, None, on_contact_effect.effects.clone()));
+						effects.push((id, None, on_contact_effect.effects.clone()));
 					}
-				}
-			}
-		}
-
-		// On contact effects.
-		for (id, other_id, effects) in on_contact_effects
-		{
-			for effect in effects
-			{
-				match (effect, other_id)
-				{
-					(comps::ContactEffect::Die, _) => to_die.push((true, id)),
 				}
 			}
 		}
@@ -1031,6 +1209,52 @@ impl Map
 			{
 				to_die.push((true, id));
 			}
+		}
+
+		// On death effects.
+		for &(_, id) in to_die.iter().filter(|(on_death, _)| *on_death)
+		{
+			if let Ok(on_death_effects) = self.world.get::<&comps::OnDeathEffect>(id)
+			{
+				effects.push((id, None, on_death_effects.effects.clone()));
+			}
+		}
+
+		// Effects.
+		for (id, other_id, effects) in effects
+		{
+			for effect in effects
+			{
+				match (effect, other_id)
+				{
+					(comps::Effect::Die, _) => to_die.push((false, id)),
+					(comps::Effect::SpawnFireHit, other_id) =>
+					{
+						let mut pos = None;
+						if let Some(position) = other_id
+							.and_then(|other_id| self.world.get::<&comps::Position>(other_id).ok())
+						{
+							pos = Some(position.pos.clone() + Vector3::new(0., 0., 16.));
+						}
+						else if let Ok(position) = self.world.get::<&comps::Position>(id)
+						{
+							pos = Some(position.pos.clone());
+						}
+
+						if let Some(pos) = pos
+						{
+							spawn_fns.push(Box::new(move |world: &mut hecs::World| {
+								spawn_fire_hit(pos, world)
+							}));
+						}
+					}
+				}
+			}
+		}
+
+		for spawn_fn in spawn_fns
+		{
+			spawn_fn(&mut self.world)?;
 		}
 
 		// Remove dead entities
@@ -1055,62 +1279,56 @@ impl Map
 	fn draw(&mut self, state: &game_state::GameState) -> Result<()>
 	{
 		state.core.clear_to_color(Color::from_rgb_f(0.3, 0.3, 0.3));
-		let camera_shift = &self.camera_shift(state);
-
+		state.core.clear_depth_buffer(-1.);
+		state.core.set_depth_test(Some(DepthFunction::Greater));
+		let ortho_mat = Matrix4::new_orthographic(
+			0.,
+			state.buffer_width() as f32,
+			state.buffer_height() as f32,
+			0.,
+			state.buffer_height(),
+			-state.buffer_height(),
+		);
 		state
 			.core
-			.use_shader(Some(&*state.basic_shader.upgrade().unwrap()))
-			.unwrap();
+			.use_projection_transform(&utils::mat4_to_transform(ortho_mat));
 
-		for chunk in self.chunks.iter_mut()
-		{
-			chunk.draw(Point2::new(camera_shift.x, camera_shift.y), state)?;
-		}
+		let camera_shift = &self.camera_shift(state);
 
-		let mut appearances = vec![];
-		// Appearance
-		for (_, (appearance, position)) in self
-			.world
-			.query_mut::<(&comps::Appearance, &comps::Position)>()
-		{
-			appearances.push((appearance, position));
-		}
+		// // Shadows.
+		// for (_, position) in &appearances
+		// {
+		// 	let sprite = state.get_sprite("data/shadow.cfg")?;
 
-		appearances.sort_by(|(_, position1), (_, position2)| {
-			(position1.pos.z as i32)
-				.cmp(&(position2.pos.z as i32))
-				.then((position1.pos.y as i32).cmp(&(position2.pos.y as i32)))
-		});
+		// 	if self.chunks[0].get_tile_kind(position.pos.xy()) == TileKind::Floor
+		// 	{
+		// 		sprite.draw_frame(
+		// 			utils::round_point(position.draw_pos(state.alpha).xy() + camera_shift),
+		// 			"Default",
+		// 			0,
+		// 			&state,
+		// 		);
+		// 	}
+		// }
 
-		// Shadows.
-		for (_, position) in &appearances
-		{
-			let sprite = state.get_sprite("data/shadow.cfg")?;
-
-			if self.chunks[0].get_tile_kind(position.pos.xy()) == TileKind::Floor
-			{
-				sprite.draw_frame(
-					utils::round_point(position.draw_pos(state.alpha).xy() + camera_shift),
-					"Default",
-					0,
-					&state,
-				);
-			}
-			// TODO: Why are primitives broken?
-			//state.prim.draw_filled_circle(
-			//	position.pos.x,
-			//	position.pos.y,
-			//	16.,
-			//	Color::from_rgba_f(1., 1., 1., 1.),
-			//);
-		}
-
-		// TODO: Better draw system.
+		let mut scene = Scene::new();
 		state
 			.core
 			.use_shader(Some(&*state.palette_shader.upgrade().unwrap()))
 			.unwrap();
-		for (appearance, position) in appearances
+
+		for chunk in self.chunks.iter_mut()
+		{
+			chunk.draw(
+				Point2::new(camera_shift.x, camera_shift.y),
+				&mut scene,
+				-0.5 * TILE_SIZE - self.camera_pos.pos.y,
+				state,
+			)?;
+		}
+		for (_, (appearance, position)) in self
+			.world
+			.query_mut::<(&comps::Appearance, &comps::Position)>()
 		{
 			let sprite = state.get_sprite(&appearance.sprite)?;
 			let palette_index = state.palettes.get_palette_index(
@@ -1120,9 +1338,10 @@ impl Map
 					.unwrap_or(&sprite.get_palettes()[0]),
 			)?;
 
+			state.core.set_shader_uniform("use_texture", &[1][..]).ok();
 			state
 				.core
-				.set_shader_uniform("palette_index", &[palette_index as f32][..])
+				.set_shader_uniform("show_depth", &[self.show_depth as i32 as f32][..])
 				.ok();
 			state
 				.core
@@ -1130,13 +1349,55 @@ impl Map
 				.ok();
 
 			let draw_pos = position.draw_pos(state.alpha);
-			let pos = Point2::new(draw_pos.x, draw_pos.y - draw_pos.z);
-			sprite.draw(
-				utils::round_point(pos + camera_shift),
-				&appearance.animation_state,
-				&state,
+			let pos =
+				utils::round_point(Point2::new(draw_pos.x, draw_pos.y - draw_pos.z) + camera_shift);
+
+			let (atlas_bmp, offt) = sprite.get_frame_from_state(&appearance.animation_state);
+
+			scene.add_bitmap(
+				Point3::new(
+					pos.x + offt.x,
+					pos.y + offt.y,
+					position.pos.y - self.camera_pos.pos.y + appearance.bias as f32,
+				),
+				atlas_bmp,
+				palette_index,
+				0,
 			);
 		}
+
+		for (i, page) in state.atlas.pages.iter().enumerate()
+		{
+			state.prim.draw_indexed_prim(
+				&scene.buckets[i].vertices[..],
+				Some(&page.bitmap),
+				&scene.buckets[i].indices[..],
+				0,
+				scene.buckets[i].indices.len() as u32,
+				PrimType::TriangleList,
+			);
+		}
+
+		//for (_, position) in &appearances
+		//{
+		//	let draw_pos = position.draw_pos(state.alpha);
+		//	let pos =
+		//		utils::round_point(Point2::new(draw_pos.x, draw_pos.y - draw_pos.z) + camera_shift);
+
+		//	for i in 0..10
+		//	{
+		//	state.prim.draw_elliptical_arc(
+		//		pos.x,
+		//		pos.y - 16.,
+		//		16. + i as f32 * 2.,
+		//		8.  + i as f32 * 1.,
+		//		(117. * i as f64 + 8. * state.time() % (2. * std::f64::consts::PI)) as f32,
+		//		std::f32::consts::PI / 4.,
+		//		Color::from_rgb_f(1., 0., 0.),
+		//		-1.,
+		//	);
+		//	}
+		//}
 
 		Ok(())
 	}

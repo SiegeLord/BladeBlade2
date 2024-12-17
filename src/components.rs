@@ -1,3 +1,4 @@
+use crate::error::Result;
 use crate::sprite;
 use allegro::*;
 use na::{Point3, Vector3};
@@ -54,6 +55,7 @@ pub struct Appearance
 	pub palette: Option<String>,
 	pub animation_state: sprite::AnimationState,
 	pub speed: f32,
+	pub bias: i32,
 }
 
 impl Appearance
@@ -65,6 +67,7 @@ impl Appearance
 			palette: None,
 			animation_state: sprite::AnimationState::new("Default"),
 			speed: 1.,
+			bias: 0,
 		}
 	}
 }
@@ -279,15 +282,22 @@ impl TimeToDie
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum ContactEffect
+pub enum Effect
 {
 	Die,
+	SpawnFireHit,
 }
 
 #[derive(Debug, Clone)]
 pub struct OnContactEffect
 {
-	pub effects: Vec<ContactEffect>,
+	pub effects: Vec<Effect>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OnDeathEffect
+{
+	pub effects: Vec<Effect>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -321,3 +331,5 @@ impl Jump
 		}
 	}
 }
+
+pub struct DieOnActivation;

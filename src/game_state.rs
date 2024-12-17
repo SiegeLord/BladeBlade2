@@ -239,7 +239,9 @@ impl GameState
 
 		if self.buffer1.is_none() || !FIXED_BUFFER
 		{
+			self.core.set_new_bitmap_depth(16);
 			self.buffer1 = Some(Bitmap::new(&self.core, buffer_width, buffer_height).unwrap());
+			self.core.set_new_bitmap_depth(0);
 			self.buffer2 = Some(Bitmap::new(&self.core, buffer_width, buffer_height).unwrap());
 		}
 
