@@ -153,7 +153,7 @@ pub fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::E
 		comps::Solid {
 			size: 8.,
 			mass: 1.,
-			collision_class: comps::CollisionClass::BigPlayer,
+			kind: comps::CollisionKind::BigPlayer,
 		},
 		comps::Stats::new(comps::StatValues::new_player()),
 		comps::Attack::new(comps::AttackKind::BladeBlade),
@@ -179,7 +179,7 @@ pub fn spawn_enemy(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::En
 		comps::Solid {
 			size: 8.,
 			mass: 1.,
-			collision_class: comps::CollisionClass::BigEnemy,
+			kind: comps::CollisionKind::BigEnemy,
 		},
 		comps::AI::new(),
 		comps::Stats::new(comps::StatValues::new_enemy()),
@@ -203,7 +203,7 @@ pub fn spawn_fireball(
 		comps::Solid {
 			size: 8.,
 			mass: 0.,
-			collision_class: comps::CollisionClass::SmallEnemy,
+			kind: comps::CollisionKind::SmallEnemy,
 		},
 		comps::Stats::new(comps::StatValues::new_fireball()),
 		comps::TimeToDie::new(time + 1.),
@@ -230,6 +230,25 @@ struct GridInner
 {
 	id: hecs::Entity,
 	pos: Point3<f32>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum TileKind
+{
+	Empty,
+	Floor,
+}
+
+impl TileKind
+{
+	fn from_id(id: i32) -> Self
+	{
+		match id
+		{
+			0 => TileKind::Empty,
+			_ => TileKind::Floor,
+		}
+	}
 }
 
 struct MapChunk
@@ -291,6 +310,82 @@ impl MapChunk
 		}
 		Ok(())
 	}
+
+	fn get_tile_kind(&self, pos: Point2<f32>) -> TileKind
+	{
+		let tile_x = ((pos.x + TILE_SIZE / 2.) / TILE_SIZE).floor() as i32;
+		let tile_y = ((pos.y + TILE_SIZE / 2.) / TILE_SIZE).floor() as i32;
+		if tile_x < 0 || tile_x >= self.width || tile_y < 0 || tile_y >= self.height
+		{
+			return TileKind::Empty;
+		}
+		TileKind::from_id(self.tiles[tile_y as usize * self.width as usize + tile_x as usize])
+	}
+
+	pub fn get_escape_dir(
+		&self, pos: Point2<f32>, size: f32, avoid_kind: TileKind,
+	) -> Option<Vector2<f32>>
+	{
+		let tile_x = ((pos.x + TILE_SIZE / 2.) / TILE_SIZE) as i32;
+		let tile_y = ((pos.y + TILE_SIZE / 2.) / TILE_SIZE) as i32;
+
+		let mut res = Vector2::zeros();
+		// TODO: This -1/1 isn't really right (???)
+		for map_y in tile_y - 1..=tile_y + 1
+		{
+			for map_x in tile_x - 1..=tile_x + 1
+			{
+				if map_x < 0 || map_x >= self.width || map_y < 0 || map_y >= self.height
+				{
+					continue;
+				}
+				let tile = self.tiles[(map_y * self.width + map_x) as usize];
+				if TileKind::from_id(tile) != avoid_kind
+				{
+					continue;
+				}
+
+				let cx = map_x as f32 * TILE_SIZE - TILE_SIZE / 2.;
+				let cy = map_y as f32 * TILE_SIZE - TILE_SIZE / 2.;
+
+				let vs = [
+					Point2::new(cx, cy),
+					Point2::new(cx, cy + TILE_SIZE),
+					Point2::new(cx + TILE_SIZE, cy + TILE_SIZE),
+					Point2::new(cx + TILE_SIZE, cy),
+				];
+
+				let nearest_point = utils::nearest_poly_point(&vs, pos);
+
+				let nearest_dist = utils::max(1e-20, (pos - nearest_point).norm());
+				let inside = utils::is_inside_poly(&vs, pos);
+				if nearest_dist < size || inside
+				{
+					let new_dir = if inside
+					{
+						(nearest_point - pos) * (nearest_dist + size) / nearest_dist
+					}
+					else
+					{
+						(pos - nearest_point) * (size - nearest_dist) / nearest_dist
+					};
+
+					if new_dir.norm() > res.norm()
+					{
+						res = new_dir;
+					}
+				}
+			}
+		}
+		if res.norm() > 0.
+		{
+			Some(res)
+		}
+		else
+		{
+			None
+		}
+	}
 }
 
 struct Map
@@ -308,7 +403,7 @@ impl Map
 	{
 		let mut world = hecs::World::new();
 
-		let spawn_pos = Point3::new(100., 100., 0.);
+		let spawn_pos = Point3::new(0., 0., 0.);
 
 		let player = spawn_player(spawn_pos, &mut world)?;
 
@@ -359,28 +454,34 @@ impl Map
 		self.camera_pos.snapshot();
 
 		// Input.
-		if let Ok((position, acceleration, velocity, stats, jump, affected_by_gravity)) =
-			self.world.query_one_mut::<(
-				&comps::Position,
-				&mut comps::Acceleration,
-				&mut comps::Velocity,
-				&comps::Stats,
-				&mut comps::Jump,
-				&mut comps::AffectedByGravity,
-			)>(self.player)
+		if let Ok((position, acceleration, stats)) =
+			self.world
+				.query_one_mut::<(&comps::Position, &mut comps::Acceleration, &comps::Stats)>(
+					self.player,
+				)
 		{
 			let dx = state.controls.get_action_state(controls::Action::MoveRight)
 				- state.controls.get_action_state(controls::Action::MoveLeft);
 			let dy = state.controls.get_action_state(controls::Action::MoveDown)
 				- state.controls.get_action_state(controls::Action::MoveUp);
 
-			let mut air_control = 0.25;
+			let mut air_control = 0.5;
 			if position.pos.z == 0.
 			{
 				air_control = 1.;
 			}
 			acceleration.pos = Vector3::new(dx, dy, 0.) * air_control * stats.values.acceleration;
+		}
 
+		if let Ok((position, velocity, stats, jump, affected_by_gravity)) =
+			self.world.query_one_mut::<(
+				&comps::Position,
+				&mut comps::Velocity,
+				&comps::Stats,
+				&mut comps::Jump,
+				&mut comps::AffectedByGravity,
+			)>(self.player)
+		{
 			let want_jump = state.controls.get_action_state(controls::Action::Jump) > 0.5;
 			if position.pos.z == 0. && want_jump
 			{
@@ -676,6 +777,7 @@ impl Map
 			spawn_fn(&mut self.world)?;
 		}
 
+		// Gravity.
 		for (_, (position, acceleration, affected_by_gravity)) in self
 			.world
 			.query::<(
@@ -686,6 +788,7 @@ impl Map
 			.iter()
 		{
 			if position.pos.z <= 0.
+				&& self.chunks[0].get_tile_kind(position.pos.xy()) == TileKind::Floor
 			{
 				continue;
 			}
@@ -791,9 +894,7 @@ impl Map
 		for (a, b) in grid.all_pairs(|a, b| {
 			let a_solid = self.world.get::<&comps::Solid>(a.inner.id).unwrap();
 			let b_solid = self.world.get::<&comps::Solid>(b.inner.id).unwrap();
-			a_solid
-				.collision_class
-				.collides_with(b_solid.collision_class)
+			a_solid.kind.collides_with(b_solid.kind)
 		})
 		{
 			colliding_pairs.push((a.inner, b.inner));
@@ -825,7 +926,7 @@ impl Map
 					continue;
 				}
 
-				if solid1.collision_class.interacts() && solid2.collision_class.interacts()
+				if solid1.kind.interacts() && solid2.kind.interacts()
 				{
 					let diff = 0.9 * diff * (solid1.size + solid2.size - diff_norm) / diff_norm;
 
@@ -858,20 +959,47 @@ impl Map
 					}
 				}
 			}
-		}
-		// Ground collision.
-		for (id, (position, velocity)) in self
-			.world
-			.query::<(&mut comps::Position, &mut comps::Velocity)>()
-			.iter()
-		{
-			if position.pos.z < 0.
+			// Floor collision.
+			for (id, (position, velocity, solid)) in self
+				.world
+				.query::<(&mut comps::Position, &mut comps::Velocity, &comps::Solid)>()
+				.iter()
 			{
-				position.pos.z = 0.;
-				velocity.pos.z = 0.;
-				if let Ok(on_contact_effect) = self.world.get::<&comps::OnContactEffect>(id)
+				if solid.kind.avoid_holes()
 				{
-					on_contact_effects.push((id, None, on_contact_effect.effects.clone()));
+					let push_dir = self.chunks[0].get_escape_dir(
+						position.pos.xy(),
+						solid.size,
+						TileKind::Empty,
+					);
+					if let Some(push_dir) = push_dir
+					{
+						position.pos.add_xy(push_dir);
+					}
+				}
+				if position.pos.z < 0.
+				{
+					if self.chunks[0].get_tile_kind(position.pos.xy()) == TileKind::Floor
+					{
+						position.pos.z = 0.;
+						velocity.pos.z = 0.;
+					}
+					else
+					{
+						let push_dir = self.chunks[0].get_escape_dir(
+							position.pos.xy(),
+							solid.size,
+							TileKind::Floor,
+						);
+						if let Some(push_dir) = push_dir
+						{
+							position.pos.add_xy(push_dir);
+						}
+					}
+					if let Ok(on_contact_effect) = self.world.get::<&comps::OnContactEffect>(id)
+					{
+						on_contact_effects.push((id, None, on_contact_effect.effects.clone()));
+					}
 				}
 			}
 		}
@@ -948,18 +1076,26 @@ impl Map
 			appearances.push((appearance, position));
 		}
 
-		appearances.sort_by_key(|(_, position)| position.pos.y as i32);
+		appearances.sort_by(|(_, position1), (_, position2)| {
+			(position1.pos.z as i32)
+				.cmp(&(position2.pos.z as i32))
+				.then((position1.pos.y as i32).cmp(&(position2.pos.y as i32)))
+		});
 
+		// Shadows.
 		for (_, position) in &appearances
 		{
 			let sprite = state.get_sprite("data/shadow.cfg")?;
 
-			sprite.draw_frame(
-				utils::round_point(position.draw_pos(state.alpha).xy() + camera_shift),
-				"Default",
-				0,
-				&state,
-			);
+			if self.chunks[0].get_tile_kind(position.pos.xy()) == TileKind::Floor
+			{
+				sprite.draw_frame(
+					utils::round_point(position.draw_pos(state.alpha).xy() + camera_shift),
+					"Default",
+					0,
+					&state,
+				);
+			}
 			// TODO: Why are primitives broken?
 			//state.prim.draw_filled_circle(
 			//	position.pos.x,

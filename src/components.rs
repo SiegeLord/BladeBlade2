@@ -70,7 +70,7 @@ impl Appearance
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum CollisionClass
+pub enum CollisionKind
 {
 	BigEnemy,
 	BigPlayer,
@@ -78,36 +78,46 @@ pub enum CollisionClass
 	SmallPlayer,
 }
 
-impl CollisionClass
+impl CollisionKind
 {
 	pub fn collides_with(&self, other: Self) -> bool
 	{
 		match (self, other)
 		{
-			(CollisionClass::BigEnemy, CollisionClass::BigEnemy) => true,
-			(CollisionClass::BigEnemy, CollisionClass::BigPlayer) => true,
-			(CollisionClass::BigEnemy, CollisionClass::SmallEnemy) => false,
-			(CollisionClass::BigEnemy, CollisionClass::SmallPlayer) => true,
+			(CollisionKind::BigEnemy, CollisionKind::BigEnemy) => true,
+			(CollisionKind::BigEnemy, CollisionKind::BigPlayer) => true,
+			(CollisionKind::BigEnemy, CollisionKind::SmallEnemy) => false,
+			(CollisionKind::BigEnemy, CollisionKind::SmallPlayer) => true,
 
-			(CollisionClass::BigPlayer, CollisionClass::BigEnemy) => true,
-			(CollisionClass::BigPlayer, CollisionClass::BigPlayer) => true,
-			(CollisionClass::BigPlayer, CollisionClass::SmallEnemy) => true,
-			(CollisionClass::BigPlayer, CollisionClass::SmallPlayer) => false,
+			(CollisionKind::BigPlayer, CollisionKind::BigEnemy) => true,
+			(CollisionKind::BigPlayer, CollisionKind::BigPlayer) => true,
+			(CollisionKind::BigPlayer, CollisionKind::SmallEnemy) => true,
+			(CollisionKind::BigPlayer, CollisionKind::SmallPlayer) => false,
 
-			(CollisionClass::SmallEnemy, CollisionClass::BigEnemy) => false,
-			(CollisionClass::SmallEnemy, CollisionClass::BigPlayer) => true,
-			(CollisionClass::SmallEnemy, CollisionClass::SmallEnemy) => false,
-			(CollisionClass::SmallEnemy, CollisionClass::SmallPlayer) => false,
+			(CollisionKind::SmallEnemy, CollisionKind::BigEnemy) => false,
+			(CollisionKind::SmallEnemy, CollisionKind::BigPlayer) => true,
+			(CollisionKind::SmallEnemy, CollisionKind::SmallEnemy) => false,
+			(CollisionKind::SmallEnemy, CollisionKind::SmallPlayer) => false,
 
-			(CollisionClass::SmallPlayer, CollisionClass::BigEnemy) => true,
-			(CollisionClass::SmallPlayer, CollisionClass::BigPlayer) => false,
-			(CollisionClass::SmallPlayer, CollisionClass::SmallEnemy) => false,
-			(CollisionClass::SmallPlayer, CollisionClass::SmallPlayer) => false,
+			(CollisionKind::SmallPlayer, CollisionKind::BigEnemy) => true,
+			(CollisionKind::SmallPlayer, CollisionKind::BigPlayer) => false,
+			(CollisionKind::SmallPlayer, CollisionKind::SmallEnemy) => false,
+			(CollisionKind::SmallPlayer, CollisionKind::SmallPlayer) => false,
 		}
 	}
+
 	pub fn interacts(&self) -> bool
 	{
 		true
+	}
+
+	pub fn avoid_holes(&self) -> bool
+	{
+		match self
+		{
+			CollisionKind::BigEnemy => true,
+			_ => false,
+		}
 	}
 }
 
@@ -116,7 +126,7 @@ pub struct Solid
 {
 	pub size: f32,
 	pub mass: f32,
-	pub collision_class: CollisionClass,
+	pub kind: CollisionKind,
 }
 
 #[derive(Debug, Copy, Clone)]
