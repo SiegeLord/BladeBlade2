@@ -179,6 +179,7 @@ pub struct StatValues
 	pub speed: f32,
 	pub acceleration: f32,
 	pub jump_strength: f32,
+	pub area_of_effect: f32,
 }
 
 impl Default for StatValues
@@ -189,6 +190,7 @@ impl Default for StatValues
 			speed: 0.,
 			acceleration: 0.,
 			jump_strength: 0.,
+			area_of_effect: 0.,
 		}
 	}
 }
@@ -201,6 +203,8 @@ impl StatValues
 			speed: 196.,
 			acceleration: 1024.,
 			jump_strength: 128.,
+			area_of_effect: 32. * 32.,
+			..Self::default()
 		}
 	}
 
@@ -333,3 +337,28 @@ impl Jump
 }
 
 pub struct DieOnActivation;
+
+#[derive(Debug, Copy, Clone)]
+pub struct BladeBlade
+{
+	pub num_blades: i32,
+	pub time_to_add: f64,
+	pub time_to_remove: f64,
+	pub time_to_hit: f64,
+}
+
+impl BladeBlade
+{
+	pub fn new() -> Self
+	{
+		Self {
+			num_blades: 10,
+			time_to_add: 0.,
+			time_to_remove: 0.,
+			time_to_hit: 0.,
+		}
+	}
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct CastsShadow;

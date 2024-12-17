@@ -11,7 +11,7 @@ use na::{
 	Isometry3, Matrix4, Perspective3, Point2, Point3, Quaternion, RealField, Rotation2, Rotation3,
 	Unit, Vector2, Vector3, Vector4,
 };
-use nalgebra as na;
+use nalgebra::{self as na, Point};
 use rand::prelude::*;
 use tiled;
 
@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 const TILE_SIZE: f32 = 32.;
+const PI: f32 = std::f32::consts::PI;
 
 pub struct Game
 {
@@ -318,6 +319,8 @@ fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entit
 		comps::Attack::new(comps::AttackKind::BladeBlade),
 		comps::Jump::new(),
 		comps::AffectedByGravity::new(),
+		comps::BladeBlade::new(),
+		comps::CastsShadow,
 	));
 	Ok(entity)
 }
@@ -343,6 +346,7 @@ fn spawn_enemy(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity
 		comps::AI::new(),
 		comps::Stats::new(comps::StatValues::new_enemy()),
 		comps::Attack::new(comps::AttackKind::Fireball),
+		comps::CastsShadow,
 	));
 	Ok(entity)
 }
@@ -372,6 +376,7 @@ fn spawn_fireball(
 		comps::OnDeathEffect {
 			effects: vec![comps::Effect::SpawnFireHit],
 		},
+		comps::CastsShadow,
 	));
 	Ok(entity)
 }
@@ -1295,22 +1300,7 @@ impl Map
 
 		let camera_shift = &self.camera_shift(state);
 
-		// // Shadows.
-		// for (_, position) in &appearances
-		// {
-		// 	let sprite = state.get_sprite("data/shadow.cfg")?;
-
-		// 	if self.chunks[0].get_tile_kind(position.pos.xy()) == TileKind::Floor
-		// 	{
-		// 		sprite.draw_frame(
-		// 			utils::round_point(position.draw_pos(state.alpha).xy() + camera_shift),
-		// 			"Default",
-		// 			0,
-		// 			&state,
-		// 		);
-		// 	}
-		// }
-
+		// Tiles and appearances
 		let mut scene = Scene::new();
 		state
 			.core
@@ -1322,7 +1312,7 @@ impl Map
 			chunk.draw(
 				Point2::new(camera_shift.x, camera_shift.y),
 				&mut scene,
-				-0.5 * TILE_SIZE - self.camera_pos.pos.y,
+				-0.6 * TILE_SIZE - self.camera_pos.pos.y,
 				state,
 			)?;
 		}
@@ -1366,6 +1356,36 @@ impl Map
 			);
 		}
 
+		// Shadows.
+		for (_, (position, _)) in self
+			.world
+			.query_mut::<(&comps::Position, &comps::CastsShadow)>()
+		{
+			if self.chunks[0].get_tile_kind(position.pos.xy()) != TileKind::Floor
+			{
+				continue;
+			}
+			let sprite = state.get_sprite("data/shadow.cfg")?;
+			let palette_index = state
+				.palettes
+				.get_palette_index(&sprite.get_palettes()[0])?;
+
+			let draw_pos = position.draw_pos(state.alpha);
+			let pos = utils::round_point(Point2::new(draw_pos.x, draw_pos.y) + camera_shift);
+			let (atlas_bmp, offt) = sprite.get_frame("Default", 0);
+
+			scene.add_bitmap(
+				Point3::new(
+					pos.x + offt.x,
+					pos.y + offt.y,
+					position.pos.y - self.camera_pos.pos.y - 1.,
+				),
+				atlas_bmp,
+				palette_index,
+				0,
+			);
+		}
+
 		for (i, page) in state.atlas.pages.iter().enumerate()
 		{
 			state.prim.draw_indexed_prim(
@@ -1377,6 +1397,105 @@ impl Map
 				PrimType::TriangleList,
 			);
 		}
+
+		state
+			.core
+			.use_shader(Some(&*state.basic_shader.upgrade().unwrap()))
+			.unwrap();
+
+		// BladeBlade
+		let mut trail_vertices = vec![];
+		let mut blade_vertices = vec![];
+		let mut blade_indices = vec![];
+
+		for (_, (position, blade_blade, stats)) in self
+			.world
+			.query::<(&comps::Position, &comps::BladeBlade, &comps::Stats)>()
+			.iter()
+		{
+			let draw_pos = position.draw_pos(state.alpha);
+			let pos = utils::round_point(
+				Point2::new(draw_pos.x, draw_pos.y - draw_pos.z - 8.) + camera_shift,
+			);
+
+			let radii: Vec<_> = [1., 0.5, 0.3, 0.7, 0.1, 0.6, 0.4, 0.9, 0.2, 0.8]
+				.iter()
+				.map(|&r| (r - 0.1) / 0.9 * 0.8 + 0.2)
+				.collect();
+			let offsets = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.];
+			let speeds = [0.1, 0.3, 0.5, 0.7, 1.1, 1.3, 1.7, 1.9, 2.3, 3.1];
+			let color = Color::from_rgb_f(1., 0.2, 0.2);
+
+			for blade in 0..blade_blade.num_blades
+			{
+				let r = stats.values.area_of_effect.sqrt() * radii[blade as usize];
+
+				let theta = 2.
+					* std::f64::consts::PI
+					* (state.time() / (1. - 0.5 * speeds[blade as usize] / 3.)
+						+ offsets[blade as usize]);
+				let theta = theta.rem_euclid(2. * std::f64::consts::PI) as f32;
+
+				let one_blade_vertices = [
+					Point2::new(0.5f32, 0.),
+					Point2::new(0., 1.0),
+					Point2::new(0., 0.),
+					Point2::new(0., -1.0),
+				];
+
+				let rot = Rotation2::new(theta);
+				let idx = blade_vertices.len() as i32;
+				blade_indices.extend([idx + 0, idx + 1, idx + 3, idx + 1, idx + 2, idx + 3]);
+				for vtx in one_blade_vertices
+				{
+					let vtx = rot * (3. * vtx + Vector2::new(r, 0.));
+					let z = position.pos.y + vtx.y - self.camera_pos.pos.y;
+					blade_vertices.push(Vertex {
+						x: pos.x + vtx.x,
+						y: pos.y + vtx.y,
+						z: z,
+						u: 0.,
+						v: 0.,
+						color: color,
+					});
+				}
+
+				for i in 0..10
+				{
+					for j in 0..2
+					{
+						let theta2 = -0.25 * PI * (i + j) as f32 / 10.;
+						let dx = r * (theta2 + theta).cos();
+						let dy = r * (theta2 + theta).sin();
+						let z = position.pos.y + dy - self.camera_pos.pos.y;
+
+						trail_vertices.push(Vertex {
+							x: pos.x + dx,
+							y: pos.y + dy,
+							z: z,
+							u: 0.,
+							v: 0.,
+							color: color,
+						})
+					}
+				}
+			}
+		}
+		state.prim.draw_prim(
+			&trail_vertices[..],
+			Option::<&Bitmap>::None,
+			0,
+			trail_vertices.len() as u32,
+			PrimType::LineList,
+		);
+		state.prim.draw_indexed_prim(
+			&blade_vertices[..],
+			Option::<&Bitmap>::None,
+			&blade_indices[..],
+			0,
+			blade_indices.len() as u32,
+			PrimType::TriangleList,
+		);
 
 		//for (_, position) in &appearances
 		//{
