@@ -31,11 +31,17 @@ impl Game
 {
 	pub fn new(state: &mut game_state::GameState) -> Result<Self>
 	{
-		state.cache_sprite("data/player_anim.cfg")?;
-		state.cache_sprite("data/fireball_anim.cfg")?;
-		state.cache_sprite("data/fire_hit_anim.cfg")?;
+		state.cache_sprite("data/player.cfg")?;
+		state.cache_sprite("data/fireball.cfg")?;
+		state.cache_sprite("data/fire_hit.cfg")?;
 		state.cache_sprite("data/shadow.cfg")?;
 		state.cache_sprite("data/terrain.cfg")?;
+		state.cache_sprite("data/crystal_red.cfg")?;
+		state.cache_sprite("data/crystal_blue.cfg")?;
+		state.cache_sprite("data/crystal_green.cfg")?;
+		state.cache_sprite("data/crystal_pips.cfg")?;
+		state.cache_sprite("data/soul.cfg")?;
+		state.cache_sprite("data/power_sphere.cfg")?;
 
 		Ok(Self {
 			map: Map::new(state)?,
@@ -302,7 +308,7 @@ impl Scene
 fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
 {
 	let entity = world.spawn((
-		comps::Appearance::new("data/player_anim.cfg"),
+		comps::Appearance::new("data/player.cfg"),
 		comps::Position::new(pos),
 		comps::Velocity {
 			pos: Vector3::zeros(),
@@ -329,9 +335,11 @@ fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entit
 	Ok(entity)
 }
 
-fn spawn_enemy(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
+fn spawn_enemy(
+	pos: Point3<f32>, crystal_id: hecs::Entity, world: &mut hecs::World,
+) -> Result<hecs::Entity>
 {
-	let mut appearance = comps::Appearance::new("data/player_anim.cfg");
+	let mut appearance = comps::Appearance::new("data/player.cfg");
 	appearance.palette = Some("data/player_pal2.png".to_string());
 	let entity = world.spawn((
 		appearance,
@@ -353,10 +361,78 @@ fn spawn_enemy(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity
 		comps::CastsShadow,
 		comps::Controller::new(),
 		comps::OnDeathEffect {
-			effects: vec![comps::Effect::SpawnCorpse],
+			effects: vec![
+				comps::Effect::SpawnCorpse,
+				comps::Effect::SpawnSoul(crystal_id),
+			],
 		},
 	));
 	Ok(entity)
+}
+
+fn spawn_crystal(
+	pos: Point3<f32>, kind: comps::ItemKind, world: &mut hecs::World,
+) -> Result<hecs::Entity>
+{
+	let sprite = match kind
+	{
+		comps::ItemKind::Blue => "data/crystal_blue.cfg",
+		comps::ItemKind::Red => "data/crystal_red.cfg",
+		comps::ItemKind::Green => "data/crystal_green.cfg",
+	};
+	let entity = world.spawn((
+		comps::Appearance::new(sprite),
+		comps::Position::new(pos),
+		comps::Solid {
+			size: 8.,
+			mass: std::f32::INFINITY,
+			kind: comps::CollisionKind::World,
+		},
+		comps::CastsShadow,
+		comps::Crystal::new(kind),
+		comps::OnDeathEffect {
+			effects: vec![comps::Effect::SpawnPowerSphere(kind)],
+		},
+	));
+	Ok(entity)
+}
+
+fn spawn_from_crystal(id: hecs::Entity, world: &mut hecs::World) -> Result<()>
+{
+	let mut vals = None;
+	if let Ok((position, crystal)) = world.query_one_mut::<(&comps::Position, &comps::Crystal)>(id)
+	{
+		vals = Some((position.pos, crystal.level));
+	}
+
+	let count = if let Some((pos, level)) = vals
+	{
+		let count = 1 + level;
+		let mut rng = thread_rng();
+
+		for _ in 0..count
+		{
+			spawn_enemy(
+				pos + Vector3::new(rng.gen_range(-5.0..5.0), rng.gen_range(-5.0..5.0), 0.0),
+				id,
+				world,
+			)?;
+		}
+		count
+	}
+	else
+	{
+		0
+	};
+
+	if vals.is_some()
+	{
+		world
+			.query_one_mut::<&mut comps::Crystal>(id)
+			.unwrap()
+			.enemies += count;
+	}
+	Ok(())
 }
 
 fn spawn_corpse(
@@ -392,7 +468,7 @@ fn spawn_fireball(
 {
 	let team = comps::Team::Enemy;
 	let entity = world.spawn((
-		comps::Appearance::new("data/fireball_anim.cfg"),
+		comps::Appearance::new("data/fireball.cfg"),
 		comps::Position::new(pos),
 		comps::Velocity { pos: velocity_pos },
 		comps::Acceleration {
@@ -420,9 +496,53 @@ fn spawn_fireball(
 	Ok(entity)
 }
 
+fn spawn_soul(
+	pos: Point3<f32>, target: Point3<f32>, crystal_id: hecs::Entity, world: &mut hecs::World,
+) -> Result<hecs::Entity>
+{
+	let entity = world.spawn((
+		comps::Appearance::new("data/soul.cfg"),
+		comps::Position::new(pos),
+		comps::Velocity {
+			pos: Vector3::zeros(),
+		},
+		comps::Acceleration {
+			pos: 256. * (target - pos).normalize(),
+		},
+		comps::Stats::new(comps::StatValues::new_fireball()),
+		comps::OnDeathEffect {
+			effects: vec![comps::Effect::UnlockCrystal(crystal_id)],
+		},
+		comps::PlaceToDie::new(target),
+	));
+	Ok(entity)
+}
+
+fn spawn_power_sphere(
+	pos: Point3<f32>, target: Point3<f32>, crystal_id: hecs::Entity, world: &mut hecs::World,
+) -> Result<hecs::Entity>
+{
+	let entity = world.spawn((
+		comps::Appearance::new("data/power_sphere.cfg"),
+		comps::Position::new(pos),
+		comps::Velocity {
+			pos: Vector3::zeros(),
+		},
+		comps::Acceleration {
+			pos: 256. * (target - pos).normalize(),
+		},
+		comps::Stats::new(comps::StatValues::new_fireball()),
+		comps::OnDeathEffect {
+			effects: vec![comps::Effect::ElevateCrystal(crystal_id)],
+		},
+		comps::PlaceToDie::new(target),
+	));
+	Ok(entity)
+}
+
 fn spawn_fire_hit(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
 {
-	let mut appearance = comps::Appearance::new("data/fire_hit_anim.cfg");
+	let mut appearance = comps::Appearance::new("data/fire_hit.cfg");
 	appearance.bias = 1;
 	let entity = world.spawn((
 		appearance,
@@ -637,16 +757,31 @@ impl Map
 
 		let player = spawn_player(spawn_pos, &mut world)?;
 
-		for i in 0..3
-		{
-			for j in 0..3
-			{
-				spawn_enemy(
-					Point3::new(200. + i as f32 * 32., 200. + j as f32 * 32., 0.),
-					&mut world,
-				)?;
-			}
-		}
+		let crystal = spawn_crystal(
+			Point3::new(300., 300., 0.),
+			comps::ItemKind::Red,
+			&mut world,
+		)?;
+		spawn_from_crystal(crystal, &mut world)?;
+		let crystal = spawn_crystal(
+			Point3::new(200., 200., 0.),
+			comps::ItemKind::Green,
+			&mut world,
+		)?;
+		spawn_from_crystal(crystal, &mut world)?;
+		let crystal = spawn_crystal(
+			Point3::new(300., 200., 0.),
+			comps::ItemKind::Blue,
+			&mut world,
+		)?;
+		spawn_from_crystal(crystal, &mut world)?;
+
+		let crystal = spawn_crystal(
+			Point3::new(300., 400., 0.),
+			comps::ItemKind::Blue,
+			&mut world,
+		)?;
+		spawn_from_crystal(crystal, &mut world)?;
 
 		Ok(Self {
 			world: world,
@@ -1133,7 +1268,7 @@ impl Map
 		}
 
 		// Velocity.
-		for (id, (position, acceleration, velocity)) in self
+		for (_, (position, acceleration, velocity)) in self
 			.world
 			.query::<(
 				&comps::Position,
@@ -1171,7 +1306,7 @@ impl Map
 			}
 		}
 
-		// Velocity cap.
+		// Acceleration.
 		for (_, (velocity, acceleration, stats)) in self
 			.world
 			.query::<(&mut comps::Velocity, &comps::Acceleration, &comps::Stats)>()
@@ -1201,6 +1336,20 @@ impl Map
 			{
 				position.dir = velocity.pos.y.atan2(velocity.pos.x);
 			}
+		}
+
+		// PlaceToDie
+		for (id, (position, place_to_die)) in self
+			.world
+			.query::<(&comps::Position, &mut comps::PlaceToDie)>()
+			.iter()
+		{
+			let dist = (position.pos - place_to_die.target).norm();
+			if dist > place_to_die.old_dist
+			{
+				to_die.push((true, id));
+			}
+			place_to_die.old_dist = dist;
 		}
 
 		// Collision detection
@@ -1404,6 +1553,15 @@ impl Map
 			}
 		}
 
+		// Crystal
+		for (id, crystal) in self.world.query::<&comps::Crystal>().iter()
+		{
+			if crystal.enemies <= 0
+			{
+				to_die.push((true, id));
+			}
+		}
+
 		// Camera
 		if let Ok(position) = self.world.get::<&comps::Position>(self.player)
 		{
@@ -1487,11 +1645,88 @@ impl Map
 						{
 							let pos = position.pos.clone();
 							let vel_pos = velocity.pos.clone();
-							let appearance = appearance.clone();
+							let mut appearance = appearance.clone();
+							appearance.bias = -1;
 							spawn_fns.push(Box::new(move |world: &mut hecs::World| {
 								spawn_corpse(pos, vel_pos, appearance, world)
 							}));
 						}
+					}
+					(comps::Effect::SpawnSoul(crystal_id), _) =>
+					{
+						let mut crystal_pos = None;
+						if let Ok((position, _)) = self
+							.world
+							.query_one_mut::<(&comps::Position, &mut comps::Crystal)>(crystal_id)
+						{
+							crystal_pos = Some(position.pos);
+						}
+						let mut src_pos = None;
+						if let Ok(position) = self.world.query_one_mut::<&comps::Position>(id)
+						{
+							src_pos = Some(position.pos);
+						}
+						if let (Some(pos), Some(target)) = (src_pos, crystal_pos)
+						{
+							spawn_fns.push(Box::new(move |world: &mut hecs::World| {
+								spawn_soul(
+									pos + Vector3::new(0., 0., 16.),
+									target + Vector3::new(0., 0., 16.),
+									crystal_id,
+									world,
+								)
+							}));
+						}
+					}
+					(comps::Effect::UnlockCrystal(crystal_id), _) =>
+					{
+						if let Ok(crystal) =
+							self.world.query_one_mut::<&mut comps::Crystal>(crystal_id)
+						{
+							crystal.enemies -= 1;
+						}
+					}
+					(comps::Effect::SpawnPowerSphere(kind), _) =>
+					{
+						let mut sphere_spawns = vec![];
+						let mut src_pos = None;
+						if let Ok(position) = self.world.query_one_mut::<&comps::Position>(id)
+						{
+							src_pos = Some(position.pos);
+						}
+						for (id, (position, crystal)) in self
+							.world
+							.query::<(&mut comps::Position, &mut comps::Crystal)>()
+							.iter()
+						{
+							if crystal.kind != kind
+							{
+								sphere_spawns.push((id, position.pos));
+							}
+						}
+						if let Some(pos) = src_pos
+						{
+							for (id, target) in sphere_spawns
+							{
+								spawn_fns.push(Box::new(move |world: &mut hecs::World| {
+									spawn_power_sphere(
+										pos + Vector3::new(0., 0., 16.),
+										target + Vector3::new(0., 0., 16.),
+										id,
+										world,
+									)
+								}));
+							}
+						}
+					}
+					(comps::Effect::ElevateCrystal(crystal_id), _) =>
+					{
+						if let Ok(crystal) =
+							self.world.query_one_mut::<&mut comps::Crystal>(crystal_id)
+						{
+							crystal.level += 1;
+						}
+						spawn_from_crystal(crystal_id, &mut self.world)?;
 					}
 					_ => panic!(),
 				}
@@ -1553,7 +1788,7 @@ impl Map
 			chunk.draw(
 				Point2::new(camera_shift.x, camera_shift.y),
 				&mut scene,
-				-0.6 * TILE_SIZE - self.camera_pos.pos.y,
+				-0.7 * TILE_SIZE - self.camera_pos.pos.y,
 				state,
 			)?;
 		}
@@ -1598,6 +1833,34 @@ impl Map
 			);
 		}
 
+		// Crystal pips.
+		for (_, (position, crystal)) in self
+			.world
+			.query_mut::<(&comps::Position, &comps::Crystal)>()
+		{
+			let sprite = state.get_sprite("data/crystal_pips.cfg")?;
+			let palette_index = state
+				.palettes
+				.get_palette_index(&sprite.get_palettes()[0])?;
+
+			let draw_pos = position.draw_pos(state.alpha);
+			let pos = utils::round_point(
+				utils::round_point(Point2::new(draw_pos.x, draw_pos.y - draw_pos.z)) + camera_shift,
+			);
+			let (atlas_bmp, offt) = sprite.get_frame("Default", crystal.level);
+
+			scene.add_bitmap(
+				Point3::new(
+					pos.x + offt.x,
+					pos.y + offt.y,
+					position.pos.y - self.camera_pos.pos.y + 1.,
+				),
+				atlas_bmp,
+				palette_index,
+				0,
+			);
+		}
+
 		// Shadows.
 		for (_, (position, _)) in self
 			.world
@@ -1622,7 +1885,7 @@ impl Map
 				Point3::new(
 					pos.x + offt.x,
 					pos.y + offt.y,
-					position.pos.y - self.camera_pos.pos.y - 1.,
+					position.pos.y - self.camera_pos.pos.y - 2.,
 				),
 				atlas_bmp,
 				palette_index,

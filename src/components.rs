@@ -79,6 +79,7 @@ pub enum CollisionKind
 	BigPlayer,
 	SmallEnemy,
 	SmallPlayer,
+	World,
 }
 
 impl CollisionKind
@@ -91,21 +92,31 @@ impl CollisionKind
 			(CollisionKind::BigEnemy, CollisionKind::BigPlayer) => true,
 			(CollisionKind::BigEnemy, CollisionKind::SmallEnemy) => false,
 			(CollisionKind::BigEnemy, CollisionKind::SmallPlayer) => true,
+			(CollisionKind::BigEnemy, CollisionKind::World) => true,
 
 			(CollisionKind::BigPlayer, CollisionKind::BigEnemy) => true,
 			(CollisionKind::BigPlayer, CollisionKind::BigPlayer) => true,
 			(CollisionKind::BigPlayer, CollisionKind::SmallEnemy) => true,
 			(CollisionKind::BigPlayer, CollisionKind::SmallPlayer) => false,
+			(CollisionKind::BigPlayer, CollisionKind::World) => true,
 
 			(CollisionKind::SmallEnemy, CollisionKind::BigEnemy) => false,
 			(CollisionKind::SmallEnemy, CollisionKind::BigPlayer) => true,
 			(CollisionKind::SmallEnemy, CollisionKind::SmallEnemy) => false,
 			(CollisionKind::SmallEnemy, CollisionKind::SmallPlayer) => false,
+			(CollisionKind::SmallEnemy, CollisionKind::World) => true,
 
 			(CollisionKind::SmallPlayer, CollisionKind::BigEnemy) => true,
 			(CollisionKind::SmallPlayer, CollisionKind::BigPlayer) => false,
 			(CollisionKind::SmallPlayer, CollisionKind::SmallEnemy) => false,
 			(CollisionKind::SmallPlayer, CollisionKind::SmallPlayer) => false,
+			(CollisionKind::SmallPlayer, CollisionKind::World) => true,
+
+			(CollisionKind::World, CollisionKind::BigEnemy) => true,
+			(CollisionKind::World, CollisionKind::BigPlayer) => false,
+			(CollisionKind::World, CollisionKind::SmallEnemy) => false,
+			(CollisionKind::World, CollisionKind::SmallPlayer) => false,
+			(CollisionKind::World, CollisionKind::World) => true,
 		}
 	}
 
@@ -219,6 +230,7 @@ impl StatValues
 			area_of_effect: 32. * 32.,
 			skill_duration: 1.,
 			team: Team::Player,
+			health: 100.,
 			..Self::default()
 		}
 	}
@@ -330,6 +342,24 @@ impl TimeToDie
 }
 
 #[derive(Debug, Copy, Clone)]
+pub struct PlaceToDie
+{
+	pub target: Point3<f32>,
+	pub old_dist: f32,
+}
+
+impl PlaceToDie
+{
+	pub fn new(target: Point3<f32>) -> Self
+	{
+		Self {
+			target: target,
+			old_dist: std::f32::INFINITY,
+		}
+	}
+}
+
+#[derive(Debug, Copy, Clone)]
 pub enum Damage
 {
 	Magic(f32),
@@ -342,6 +372,10 @@ pub enum Effect
 	SpawnFireHit,
 	DoDamage(Damage, Team),
 	SpawnCorpse,
+	SpawnSoul(hecs::Entity),
+	UnlockCrystal(hecs::Entity),
+	SpawnPowerSphere(ItemKind),
+	ElevateCrystal(hecs::Entity),
 }
 
 #[derive(Debug, Clone)]
@@ -433,3 +467,31 @@ impl Controller
 
 #[derive(Debug, Copy, Clone)]
 pub struct Corpse;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum ItemKind
+{
+	Blue,
+	Red,
+	Green,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Crystal
+{
+	pub kind: ItemKind,
+	pub level: i32,
+	pub enemies: i32,
+}
+
+impl Crystal
+{
+	pub fn new(kind: ItemKind) -> Self
+	{
+		Self {
+			kind: kind,
+			level: 0,
+			enemies: 0,
+		}
+	}
+}

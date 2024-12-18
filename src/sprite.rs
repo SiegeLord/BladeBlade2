@@ -96,14 +96,17 @@ impl Sprite
 			}
 		}
 
-		desc.animations.insert(
-			"Default".to_string(),
-			AnimationDesc {
-				frames: (0..frames.len()).map(|i| i as i32 + 1).collect(),
-				frame_ms: vec![],
-				active_frame: 0,
-			},
-		);
+		if !desc.animations.contains_key("Default")
+		{
+			desc.animations.insert(
+				"Default".to_string(),
+				AnimationDesc {
+					frames: (0..frames.len()).map(|i| i as i32 + 1).collect(),
+					frame_ms: vec![],
+					active_frame: 0,
+				},
+			);
+		}
 
 		let mut animations = HashMap::new();
 		for (name, animation_desc) in &mut desc.animations
