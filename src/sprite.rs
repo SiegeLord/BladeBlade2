@@ -207,7 +207,14 @@ impl Sprite
 			state.frame_idx = 0;
 			state.num_activations = 0;
 		}
-		let animation_desc = &self.desc.animations[&state.animation_name];
+		let animation_desc = &self
+			.desc
+			.animations
+			.get(&state.animation_name)
+			.expect(&format!(
+				"Could not find animation '{}'",
+				state.animation_name
+			));
 		state.frame_progress += amount * 1000.;
 		while state.frame_progress > animation_desc.frame_ms[state.frame_idx as usize]
 		{

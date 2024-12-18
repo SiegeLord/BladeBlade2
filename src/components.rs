@@ -173,6 +173,13 @@ impl AI
 	}
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Team
+{
+	Player,
+	Enemy,
+}
+
 #[derive(Debug, Copy, Clone)]
 pub struct StatValues
 {
@@ -181,6 +188,8 @@ pub struct StatValues
 	pub jump_strength: f32,
 	pub area_of_effect: f32,
 	pub skill_duration: f32,
+	pub health: f32,
+	pub team: Team,
 }
 
 impl Default for StatValues
@@ -193,6 +202,8 @@ impl Default for StatValues
 			jump_strength: 0.,
 			area_of_effect: 0.,
 			skill_duration: 0.,
+			health: 10.,
+			team: Team::Enemy,
 		}
 	}
 }
@@ -207,6 +218,7 @@ impl StatValues
 			jump_strength: 128.,
 			area_of_effect: 32. * 32.,
 			skill_duration: 1.,
+			team: Team::Player,
 			..Self::default()
 		}
 	}
@@ -217,6 +229,7 @@ impl StatValues
 			speed: 64.,
 			acceleration: 1024.,
 			skill_duration: 0.25,
+			health: 1.,
 			..Self::default()
 		}
 	}
@@ -231,11 +244,13 @@ impl StatValues
 	}
 }
 
-#[derive(Debug, Copy, Clone)]
 pub struct Stats
 {
 	pub base_values: StatValues,
 	pub values: StatValues,
+
+	pub attacking: bool,
+	pub damage: f32,
 }
 
 impl Stats
@@ -245,12 +260,31 @@ impl Stats
 		Self {
 			base_values: base_values,
 			values: base_values,
+			attacking: false,
+			damage: 0.,
 		}
 	}
 
 	pub fn reset(&mut self)
 	{
 		self.values = self.base_values;
+		if self.attacking
+		{
+			self.values.acceleration = 0.;
+			self.values.jump_strength = 0.;
+		}
+		self.values.health -= self.damage;
+	}
+
+	pub fn apply_damage(&mut self, damage: Damage)
+	{
+		match damage
+		{
+			Damage::Magic(damage) =>
+			{
+				self.damage += damage;
+			}
+		}
 	}
 }
 
@@ -281,6 +315,7 @@ impl Attack
 	}
 }
 
+#[derive(Debug, Copy, Clone)]
 pub struct TimeToDie
 {
 	pub time: f64,
@@ -295,10 +330,18 @@ impl TimeToDie
 }
 
 #[derive(Debug, Copy, Clone)]
+pub enum Damage
+{
+	Magic(f32),
+}
+
+#[derive(Debug, Copy, Clone)]
 pub enum Effect
 {
 	Die,
 	SpawnFireHit,
+	DoDamage(Damage, Team),
+	SpawnCorpse,
 }
 
 #[derive(Debug, Clone)]
@@ -387,3 +430,6 @@ impl Controller
 		}
 	}
 }
+
+#[derive(Debug, Copy, Clone)]
+pub struct Corpse;

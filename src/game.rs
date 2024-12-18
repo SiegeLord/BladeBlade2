@@ -322,6 +322,9 @@ fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entit
 		comps::BladeBlade::new(),
 		comps::CastsShadow,
 		comps::Controller::new(),
+		comps::OnDeathEffect {
+			effects: vec![comps::Effect::SpawnCorpse],
+		},
 	));
 	Ok(entity)
 }
@@ -349,6 +352,35 @@ fn spawn_enemy(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity
 		comps::Attack::new(comps::AttackKind::Fireball),
 		comps::CastsShadow,
 		comps::Controller::new(),
+		comps::OnDeathEffect {
+			effects: vec![comps::Effect::SpawnCorpse],
+		},
+	));
+	Ok(entity)
+}
+
+fn spawn_corpse(
+	pos: Point3<f32>, vel_pos: Vector3<f32>, appearance: comps::Appearance, world: &mut hecs::World,
+) -> Result<hecs::Entity>
+{
+	let entity = world.spawn((
+		appearance,
+		comps::Position::new(pos),
+		comps::Velocity { pos: vel_pos },
+		comps::Acceleration {
+			pos: Vector3::zeros(),
+		},
+		comps::AffectedByGravity::new(),
+		comps::CastsShadow,
+		comps::Corpse,
+		comps::Solid {
+			size: 8.,
+			mass: 1.,
+			kind: comps::CollisionKind::SmallPlayer,
+		},
+		// TODO: Surprising amount of components to get friction/gravity working
+		comps::Stats::new(comps::StatValues::new_player()),
+		comps::Controller::new(),
 	));
 	Ok(entity)
 }
@@ -358,6 +390,7 @@ fn spawn_fireball(
 	world: &mut hecs::World,
 ) -> Result<hecs::Entity>
 {
+	let team = comps::Team::Enemy;
 	let entity = world.spawn((
 		comps::Appearance::new("data/fireball_anim.cfg"),
 		comps::Position::new(pos),
@@ -373,7 +406,11 @@ fn spawn_fireball(
 		comps::Stats::new(comps::StatValues::new_fireball()),
 		comps::TimeToDie::new(time + 1.),
 		comps::OnContactEffect {
-			effects: vec![comps::Effect::Die, comps::Effect::SpawnFireHit],
+			effects: vec![
+				comps::Effect::Die,
+				comps::Effect::SpawnFireHit,
+				comps::Effect::DoDamage(comps::Damage::Magic(1.), team),
+			],
 		},
 		comps::OnDeathEffect {
 			effects: vec![comps::Effect::SpawnFireHit],
@@ -646,20 +683,16 @@ impl Map
 		self.camera_pos.snapshot();
 
 		// Stats.
-		for (_, stats) in self.world.query::<&mut comps::Stats>().iter()
-		{
-			stats.reset();
-		}
 		for (_, (stats, attack)) in self
 			.world
 			.query::<(&mut comps::Stats, &comps::Attack)>()
 			.iter()
 		{
-			if attack.want_attack
-			{
-				stats.values.acceleration = 0.;
-				stats.values.jump_strength = 0.;
-			}
+			stats.attacking = attack.want_attack;
+		}
+		for (_, stats) in self.world.query::<&mut comps::Stats>().iter()
+		{
+			stats.reset();
 		}
 
 		// Input.
@@ -713,6 +746,14 @@ impl Map
 				}
 			}
 
+			if let Some(cur_target) = target
+			{
+				if !self.world.contains(cur_target)
+				{
+					target = None;
+				}
+			}
+
 			let target_position =
 				target.and_then(|target| self.world.get::<&comps::Position>(target).ok());
 			let mut in_range = false;
@@ -734,6 +775,7 @@ impl Map
 			{
 				comps::AIState::Idle =>
 				{
+					controller.want_attack = false;
 					if let Some(target) = target
 					{
 						next_state = Some(comps::AIState::Chase(target));
@@ -764,6 +806,7 @@ impl Map
 				}
 				comps::AIState::Wander =>
 				{
+					controller.want_attack = false;
 					if let Some(target) = target
 					{
 						next_state = Some(comps::AIState::Chase(target));
@@ -775,22 +818,17 @@ impl Map
 				}
 				comps::AIState::Chase(cur_target) =>
 				{
+					controller.want_attack = false;
 					if let Some(target_position) = target_position
 					{
 						if in_range
 						{
-							controller.want_move = Vector2::zeros();
-							controller.want_attack = true;
-							controller.target_position = target_position.pos;
-							let diff = target_position.pos - position.pos;
-							position.dir = diff.y.atan2(diff.x);
-							next_state = Some(comps::AIState::Chase(cur_target));
+							next_state = Some(comps::AIState::Attack(cur_target));
 						}
 						else
 						{
 							let diff = (target_position.pos.xy() - position.pos.xy()).normalize();
 							controller.want_move = diff;
-							controller.want_attack = false;
 						}
 					}
 					if state.time() > ai.next_state_time
@@ -805,7 +843,28 @@ impl Map
 						}
 					}
 				}
-				_ => (),
+				comps::AIState::Attack(cur_target) =>
+				{
+					if let Some(target_position) = target_position
+					{
+						if in_range
+						{
+							controller.want_move = Vector2::zeros();
+							controller.want_attack = true;
+							controller.target_position = target_position.pos;
+							let diff = target_position.pos - position.pos;
+							position.dir = diff.y.atan2(diff.x);
+						}
+						else
+						{
+							next_state = Some(comps::AIState::Chase(cur_target));
+						}
+					}
+					else
+					{
+						next_state = Some(comps::AIState::Idle);
+					}
+				}
 			}
 			if let Some(next_state) = next_state
 			{
@@ -970,6 +1029,14 @@ impl Map
 				appearance.speed = 1.; // TODO: cast speed
 			}
 		}
+		for (_, (appearance, _)) in self
+			.world
+			.query::<(&mut comps::Appearance, &comps::Corpse)>()
+			.iter()
+		{
+			appearance.animation_state.set_new_animation("Dead");
+			appearance.speed = 1.;
+		}
 		for (_, appearance) in self.world.query::<&mut comps::Appearance>().iter()
 		{
 			let sprite = state.get_sprite(&appearance.sprite)?;
@@ -1035,23 +1102,6 @@ impl Map
 			}
 		}
 
-		// BladeBlade
-		for (_, (position, blade_blade, stats)) in self
-			.world
-			.query::<(&comps::Position, &mut comps::BladeBlade, &comps::Stats)>()
-			.iter()
-		{
-			if state.time() > blade_blade.time_to_remove
-			{
-				blade_blade.num_blades = utils::max(0, blade_blade.num_blades - 1);
-				blade_blade.time_to_remove = state.time() + stats.values.skill_duration as f64;
-			}
-			if state.time() > blade_blade.time_to_hit && blade_blade.num_blades > 0
-			{
-				blade_blade.time_to_hit = state.time() + 0.5 / blade_blade.num_blades as f64;
-			}
-		}
-
 		// Die on activation.
 		for (id, (_, appearance)) in self
 			.world
@@ -1083,7 +1133,7 @@ impl Map
 		}
 
 		// Velocity.
-		for (_, (position, acceleration, velocity)) in self
+		for (id, (position, acceleration, velocity)) in self
 			.world
 			.query::<(
 				&comps::Position,
@@ -1287,6 +1337,73 @@ impl Map
 			}
 		}
 
+		// BladeBlade
+		for (id, (position, blade_blade, stats)) in self
+			.world
+			.query::<(&comps::Position, &mut comps::BladeBlade, &comps::Stats)>()
+			.iter()
+		{
+			if state.time() > blade_blade.time_to_remove
+			{
+				blade_blade.num_blades = utils::max(0, blade_blade.num_blades - 1);
+				blade_blade.time_to_remove = state.time() + stats.values.skill_duration as f64;
+			}
+			if state.time() > blade_blade.time_to_hit && blade_blade.num_blades > 0
+			{
+				blade_blade.time_to_hit = state.time() + 0.5 / blade_blade.num_blades as f64;
+
+				let r = stats.values.area_of_effect.sqrt();
+				let rv = Vector2::new(r, r);
+				let entries =
+					grid.query_rect(position.pos.xy() - rv, position.pos.xy() + rv, |other| {
+						let other_id = other.inner.id;
+						if id == other_id
+						{
+							false
+						}
+						else if let Some(other_stats) = self
+							.world
+							.query_one::<&comps::Stats>(other_id)
+							.unwrap()
+							.get()
+						{
+							other_stats.values.team != stats.values.team
+						}
+						else
+						{
+							false
+						}
+					});
+				for entry in entries
+				{
+					let other_id = entry.inner.id;
+					if let Some(other_position) = self
+						.world
+						.query_one::<&comps::Position>(other_id)
+						.unwrap()
+						.get()
+					{
+						let diff_xy = position.pos.xy() - other_position.pos.xy();
+						let diff_z = position.pos.z - other_position.pos.z;
+						if diff_xy.norm() < r && diff_z.abs() < 16.
+						{
+							effects.push((
+								id,
+								Some(other_id),
+								vec![
+									comps::Effect::SpawnFireHit,
+									comps::Effect::DoDamage(
+										comps::Damage::Magic(1.),
+										stats.values.team,
+									),
+								],
+							));
+						}
+					}
+				}
+			}
+		}
+
 		// Camera
 		if let Ok(position) = self.world.get::<&comps::Position>(self.player)
 		{
@@ -1299,6 +1416,15 @@ impl Map
 		for (id, time_to_die) in self.world.query_mut::<&comps::TimeToDie>()
 		{
 			if state.time() > time_to_die.time
+			{
+				to_die.push((true, id));
+			}
+		}
+
+		// Die on zero health.
+		for (id, stats) in self.world.query::<&comps::Stats>().iter()
+		{
+			if stats.values.health <= 0.
 			{
 				to_die.push((true, id));
 			}
@@ -1341,6 +1467,33 @@ impl Map
 							}));
 						}
 					}
+					(comps::Effect::DoDamage(damage, team), Some(other_id)) =>
+					{
+						if let Ok(stats) = self.world.query_one_mut::<&mut comps::Stats>(other_id)
+						{
+							if stats.values.team != team
+							{
+								stats.apply_damage(damage);
+							}
+						}
+					}
+					(comps::Effect::SpawnCorpse, _) =>
+					{
+						if let Ok((position, appearance, velocity)) =
+							self.world
+								.query_one_mut::<(&comps::Position, &comps::Appearance, &comps::Velocity)>(
+									id,
+								)
+						{
+							let pos = position.pos.clone();
+							let vel_pos = velocity.pos.clone();
+							let appearance = appearance.clone();
+							spawn_fns.push(Box::new(move |world: &mut hecs::World| {
+								spawn_corpse(pos, vel_pos, appearance, world)
+							}));
+						}
+					}
+					_ => panic!(),
 				}
 			}
 		}
@@ -1427,8 +1580,9 @@ impl Map
 				.ok();
 
 			let draw_pos = position.draw_pos(state.alpha);
-			let pos =
-				utils::round_point(Point2::new(draw_pos.x, draw_pos.y - draw_pos.z) + camera_shift);
+			let pos = utils::round_point(
+				utils::round_point(Point2::new(draw_pos.x, draw_pos.y - draw_pos.z)) + camera_shift,
+			);
 
 			let (atlas_bmp, offt) = sprite.get_frame_from_state(&appearance.animation_state);
 
@@ -1459,7 +1613,9 @@ impl Map
 				.get_palette_index(&sprite.get_palettes()[0])?;
 
 			let draw_pos = position.draw_pos(state.alpha);
-			let pos = utils::round_point(Point2::new(draw_pos.x, draw_pos.y) + camera_shift);
+			let pos = utils::round_point(
+				utils::round_point(Point2::new(draw_pos.x, draw_pos.y)) + camera_shift,
+			);
 			let (atlas_bmp, offt) = sprite.get_frame("Default", 0);
 
 			scene.add_bitmap(
