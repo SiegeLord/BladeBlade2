@@ -277,7 +277,7 @@ impl InventoryScreen
 				let player_pos = map.world.get::<&comps::Position>(map.player).unwrap().pos;
 				let id = spawn_item(
 					player_pos + Vector3::new(0., 5., 0.),
-					Vector3::new(0., 0., 256.),
+					Vector3::new(0., 0., 128.),
 					drop_item,
 					&mut map.world,
 				)?;
@@ -335,88 +335,134 @@ impl InventoryScreen
 		let panel_height = 160.;
 		let pad = 10.;
 
-		let item_left = state.buffer_width() as f32 - panel_width - pad;
-		let item_right = item_left + panel_width;
-		let item_center = item_left + panel_width / 2.;
+		let stats_left = pad;
+		let stats_right = stats_left + panel_width;
+		let stats_center = stats_left + panel_width / 2.;
+		let stats_top = state.buffer_height() as f32 / 2. - pad / 2. - panel_height;
+		let stats_bottom = stats_top + panel_height;
 
-		let cur_item_top = state.buffer_height() as f32 / 2. - panel_height - pad / 2.;
+		let cur_item_left = pad;
+		let cur_item_right = cur_item_left + panel_width;
+		let cur_item_center = cur_item_left + panel_width / 2.;
+		let cur_item_top = state.buffer_height() as f32 / 2. + pad / 2.;
 		let cur_item_bottom = cur_item_top + panel_height;
 
-		let ground_item_top = state.buffer_height() as f32 / 2. + pad / 2.;
+		let ground_item_left = state.buffer_width() as f32 - panel_width - pad;
+		let ground_item_right = ground_item_left + panel_width;
+		let ground_item_center = ground_item_left + panel_width / 2.;
+		let ground_item_top = state.buffer_height() as f32 / 2. - panel_height / 2.;
 		let ground_item_bottom = ground_item_top + panel_height;
 
 		let lh = state.ui_font().get_line_height() as f32 + 2.;
 
+		let mut scene = Scene::new();
+
+		let mut text_y = stats_top + pad / 2.;
+
+		let stats = map.world.get::<&comps::Stats>(map.player)?;
 		state.prim.draw_filled_rectangle(
-			item_left,
-			cur_item_top,
-			item_right,
-			cur_item_bottom,
+			stats_left,
+			stats_top,
+			stats_right,
+			stats_bottom,
 			Color::from_rgb_f(0., 0., 0.),
 		);
-		state.prim.draw_filled_rectangle(
-			item_left,
-			ground_item_top,
-			item_right,
-			ground_item_bottom,
-			Color::from_rgb_f(0., 0., 0.),
+
+		state.core.draw_text(
+			state.ui_font(),
+			Color::from_rgb_f(1., 1., 1.),
+			stats_left + pad / 2.,
+			text_y,
+			FontAlign::Left,
+			&format!("Max Health: {}", stats.values.max_health),
 		);
+		text_y += lh;
 
 		let mut text_y = cur_item_top + pad / 2.;
 
-		state.core.draw_text(
-			state.ui_font(),
-			Color::from_rgb_f(1., 1., 1.),
-			item_center,
-			text_y,
-			FontAlign::Centre,
-			"Selected Item",
-		);
-		text_y += lh;
-
 		if let Some(item) = inventory.slots[self.selection as usize].as_ref()
 		{
-			state.core.draw_text(
-				state.ui_font(),
-				Color::from_rgb_f(1., 1., 1.),
-				item_center,
-				text_y,
-				FontAlign::Centre,
-				&item.name,
+			state.prim.draw_filled_rectangle(
+				cur_item_left,
+				cur_item_top,
+				cur_item_right,
+				cur_item_bottom,
+				Color::from_rgb_f(0., 0., 0.),
 			);
+
+			for name in &item.name
+			{
+				if name.is_empty()
+				{
+					continue;
+				}
+				state.core.draw_text(
+					state.ui_font(),
+					Color::from_rgb_f(1., 1., 1.),
+					cur_item_center,
+					text_y,
+					FontAlign::Centre,
+					&name,
+				);
+				text_y += lh;
+			}
 		}
 
 		let mut text_y = ground_item_top + pad / 2.;
-
-		state.core.draw_text(
-			state.ui_font(),
-			Color::from_rgb_f(1., 1., 1.),
-			item_center,
-			text_y,
-			FontAlign::Centre,
-			"Ground Item",
-		);
-		text_y += lh;
 
 		if let Some(item) = map
 			.nearby_item
 			.and_then(|id| map.world.get::<&comps::Item>(id).ok())
 		{
-			state.core.draw_text(
-				state.ui_font(),
-				Color::from_rgb_f(1., 1., 1.),
-				item_center,
-				text_y,
-				FontAlign::Centre,
-				&item.name,
+			state.prim.draw_filled_rectangle(
+				ground_item_left,
+				ground_item_top,
+				ground_item_right,
+				ground_item_bottom,
+				Color::from_rgb_f(0., 0., 0.),
+			);
+
+			for name in &item.name
+			{
+				if name.is_empty()
+				{
+					continue;
+				}
+				state.core.draw_text(
+					state.ui_font(),
+					Color::from_rgb_f(1., 1., 1.),
+					ground_item_center,
+					text_y,
+					FontAlign::Centre,
+					&name,
+				);
+				text_y += lh;
+			}
+
+			let appearance = &item.appearance;
+			let sprite = state.get_sprite(&appearance.sprite)?;
+			let palette_index = state.palettes.get_palette_index(
+				appearance
+					.palette
+					.as_ref()
+					.unwrap_or(&sprite.get_palettes()[0]),
+			)?;
+
+			let pos = Point2::new(ground_item_center, ground_item_top - 16.);
+
+			let (atlas_bmp, offt) = sprite.get_frame_from_state(&appearance.animation_state);
+
+			scene.add_bitmap(
+				Point3::new(
+					pos.x + offt.x,
+					pos.y + offt.y + (2. * (state.core.get_time() * 8.).cos()).floor() as f32,
+					0.,
+				),
+				atlas_bmp,
+				palette_index,
+				0,
 			);
 		}
-
-		let mut scene = Scene::new();
-		state
-			.core
-			.use_shader(Some(&*state.palette_shader.upgrade().unwrap()))
-			.unwrap();
 
 		for (i, (item, cell_offt)) in inventory.slots.iter().zip(CELL_OFFTS.iter()).enumerate()
 		{
@@ -451,6 +497,10 @@ impl InventoryScreen
 				0,
 			);
 		}
+		state
+			.core
+			.use_shader(Some(&*state.palette_shader.upgrade().unwrap()))
+			.unwrap();
 		scene.draw_triangles(state);
 		Ok(())
 	}
@@ -631,14 +681,7 @@ impl Scene
 
 fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
 {
-	let mut inventory = comps::Inventory::new();
-
-	inventory.slots[1] = Some(comps::Item {
-		name: "+134 lightning dmg".to_string(),
-		//name: "enemies explode on death".to_string(),
-		appearance: comps::Appearance::new("data/ring_red.cfg"),
-	});
-
+	let inventory = comps::Inventory::new();
 	let entity = world.spawn((
 		comps::Appearance::new("data/player.cfg"),
 		comps::Position::new(pos),
@@ -805,7 +848,7 @@ fn spawn_corpse(
 	let stats = if let Some(mut stats) = stats
 	{
 		stats.dead = true;
-		stats.damage = 0.;
+		stats.health = 1.;
 		stats
 	}
 	else
@@ -1134,10 +1177,7 @@ impl Map
 		spawn_item(
 			Point3::new(32., 0., 0.),
 			Vector3::new(0., 0., 128.),
-			comps::Item {
-				name: "Ground item".into(),
-				appearance: comps::Appearance::new("data/ring_red.cfg"),
-			},
+			comps::generate_item(comps::ItemKind::Red, 6, 3, &mut thread_rng()),
 			&mut world,
 		)?;
 
@@ -1215,9 +1255,10 @@ impl Map
 		{
 			stats.attacking = attack.want_attack;
 		}
-		for (_, stats) in self.world.query::<&mut comps::Stats>().iter()
+		for (id, stats) in self.world.query::<&mut comps::Stats>().iter()
 		{
-			stats.reset();
+			let inventory = self.world.get::<&comps::Inventory>(id).ok();
+			stats.reset(inventory.as_deref());
 		}
 
 		// Input.
@@ -2056,7 +2097,7 @@ impl Map
 		// Die on zero health.
 		for (id, stats) in self.world.query::<&comps::Stats>().iter()
 		{
-			if stats.values.health <= 0.
+			if stats.health <= 0.
 			{
 				to_die.push((true, id));
 			}
@@ -2231,9 +2272,11 @@ impl Map
 						}
 						spawn_from_crystal(crystal_id, &mut self.world)?;
 					}
-					(comps::Effect::SpawnItems(_kind), _) =>
+					(comps::Effect::SpawnItems(kind), _) =>
 					{
-						if let Ok(position) = self.world.query_one_mut::<&comps::Position>(id)
+						if let Ok((position, crystal)) = self
+							.world
+							.query_one_mut::<(&comps::Position, &comps::Crystal)>(id)
 						{
 							let pos = position.pos
 								+ Vector3::new(
@@ -2241,14 +2284,13 @@ impl Map
 									rng.gen_range(-4.0..4.0),
 									0.,
 								);
+							let crystal_level = crystal.level;
 							spawn_fns.push(Box::new(move |map| {
+								let mut rng = thread_rng();
 								spawn_item(
 									pos,
-									Vector3::new(0., 0., 256.),
-									comps::Item {
-										name: "Spawned item".into(),
-										appearance: comps::Appearance::new("data/ring_red.cfg"),
-									},
+									Vector3::new(0., 0., 128.),
+									comps::generate_item(kind, crystal_level, 0, &mut rng),
 									&mut map.world,
 								)
 							}));
