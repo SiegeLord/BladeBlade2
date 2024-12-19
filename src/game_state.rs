@@ -217,8 +217,8 @@ impl GameState
 		let buffer_height;
 		if FIXED_BUFFER
 		{
-			buffer_width = 320;
-			buffer_height = 240;
+			buffer_width = 320 * 3 / 2;
+			buffer_height = 240 * 3 / 2;
 		}
 		else
 		{
@@ -245,11 +245,16 @@ impl GameState
 			self.buffer2 = Some(Bitmap::new(&self.core, buffer_width, buffer_height).unwrap());
 		}
 
-		self.ui_font = Some(utils::load_ttf_font(
+		self.ui_font = Some(
+			Font::new_builtin(&self.font)
+				.map_err(|_| "Couldn't create builtin font".to_string())?,
+		);
+
+		/*	Some(utils::load_ttf_font(
 			&self.ttf,
-			"data/Energon.ttf",
-			(-24. * self.options.ui_scale) as i32,
-		)?);
+			"data/MHTIROGLA.ttf",
+			(-8. * self.options.ui_scale) as i32,
+		)?);*/
 		Ok(())
 	}
 

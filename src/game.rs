@@ -25,6 +25,7 @@ pub struct Game
 {
 	map: Map,
 	subscreens: ui::SubScreens,
+	inventory_screen: Option<InventoryScreen>,
 }
 
 impl Game
@@ -42,10 +43,15 @@ impl Game
 		state.cache_sprite("data/crystal_pips.cfg")?;
 		state.cache_sprite("data/soul.cfg")?;
 		state.cache_sprite("data/power_sphere.cfg")?;
+		state.cache_sprite("data/inventory_center_bkg.cfg")?;
+		state.cache_sprite("data/inventory_cell.cfg")?;
+		state.cache_sprite("data/ring_red.cfg")?;
+		state.cache_sprite("data/item.cfg")?;
 
 		Ok(Self {
 			map: Map::new(state)?,
 			subscreens: ui::SubScreens::new(state),
+			inventory_screen: None,
 		})
 	}
 
@@ -55,12 +61,31 @@ impl Game
 	{
 		if self.subscreens.is_empty()
 		{
-			self.map.logic(state)
+			let want_inventory = state.controls.get_action_state(controls::Action::Inventory) > 0.5;
+
+			if want_inventory
+			{
+				if self.inventory_screen.is_none()
+				{
+					self.inventory_screen = Some(InventoryScreen::new());
+					state.paused = true;
+				}
+				else
+				{
+					self.inventory_screen = None;
+					state.controls.clear_action_states();
+					state.paused = false;
+				}
+			}
+			state
+				.controls
+				.clear_action_state(controls::Action::Inventory);
 		}
-		else
+		if let Some(inventory_screen) = self.inventory_screen.as_mut()
 		{
-			Ok(None)
+			inventory_screen.logic(&mut self.map, state)?;
 		}
+		self.map.logic(state)
 	}
 
 	pub fn input(
@@ -82,7 +107,12 @@ impl Game
 		}
 		if self.subscreens.is_empty()
 		{
-			let in_game_menu;
+			let mut in_game_menu = false;
+			let mut handled = false;
+			if let Some(inventory_screen) = self.inventory_screen.as_mut()
+			{
+				handled |= inventory_screen.input(event, &mut self.map, state)?;
+			}
 			match *event
 			{
 				Event::KeyDown {
@@ -94,14 +124,17 @@ impl Game
 				}
 				_ =>
 				{
-					let res = self.map.input(event, state);
-					if let Ok(Some(game_state::NextScreen::InGameMenu)) = res
+					if !handled
 					{
-						in_game_menu = true;
-					}
-					else
-					{
-						return res;
+						let res = self.map.input(event, state);
+						if let Ok(Some(game_state::NextScreen::InGameMenu)) = res
+						{
+							in_game_menu = true;
+						}
+						else
+						{
+							return res;
+						}
 					}
 				}
 			}
@@ -125,7 +158,11 @@ impl Game
 			}
 			if self.subscreens.is_empty()
 			{
-				state.paused = false;
+				state.controls.clear_action_states();
+				if self.inventory_screen.is_none()
+				{
+					state.paused = false;
+				}
 			}
 		}
 		Ok(None)
@@ -133,14 +170,21 @@ impl Game
 
 	pub fn draw(&mut self, state: &game_state::GameState) -> Result<()>
 	{
+		self.map.draw(state)?;
+		if let Some(inventory_screen) = self.inventory_screen.as_mut()
+		{
+			inventory_screen.draw(&self.map, state)?;
+		}
 		if !self.subscreens.is_empty()
 		{
-			state.core.clear_to_color(Color::from_rgb_f(0.0, 0.0, 0.0));
+			state
+				.core
+				.use_shader(Some(&*state.basic_shader.upgrade().unwrap()))
+				.unwrap();
+			state.core.set_depth_test(None);
+
+			//state.core.clear_to_color(Color::from_rgb_f(0.0, 0.0, 0.0));
 			self.subscreens.draw(state);
-		}
-		else
-		{
-			self.map.draw(state)?;
 		}
 		Ok(())
 	}
@@ -148,6 +192,267 @@ impl Game
 	pub fn resize(&mut self, state: &game_state::GameState)
 	{
 		self.subscreens.resize(state);
+	}
+}
+
+struct InventoryScreen
+{
+	selection: i32,
+}
+
+const CELL_OFFTS: [Vector2<f32>; 6] = [
+	Vector2::new(0., -58.),
+	Vector2::new(48., -27.),
+	Vector2::new(48., 27.),
+	Vector2::new(0., 58.),
+	Vector2::new(-48., 27.),
+	Vector2::new(-48., -27.),
+];
+
+impl InventoryScreen
+{
+	pub fn new() -> Self
+	{
+		Self { selection: 0 }
+	}
+
+	pub fn input(
+		&mut self, event: &Event, map: &mut Map, _state: &mut game_state::GameState,
+	) -> Result<bool>
+	{
+		// LOL!
+		let mut sel_dir = Vector2::zeros();
+		let mut do_swap = false;
+		match event
+		{
+			KeyChar { keycode, .. } => match keycode
+			{
+				KeyCode::Down => sel_dir = Vector2::new(0., 1.),
+				KeyCode::Up => sel_dir = Vector2::new(0., -1.),
+				KeyCode::Left => sel_dir = Vector2::new(-1., 0.),
+				KeyCode::Right => sel_dir = Vector2::new(1., 0.),
+				KeyCode::Space | KeyCode::Enter =>
+				{
+					do_swap = true;
+				}
+				_ => (),
+			},
+			_ => (),
+		}
+		let cur_offt = CELL_OFFTS[self.selection as usize];
+
+		let mut best = (self.selection, std::f32::INFINITY);
+		for (i, cell_offt) in CELL_OFFTS.iter().enumerate()
+		{
+			if i as i32 == self.selection
+			{
+				continue;
+			}
+			let dir = cell_offt - cur_offt;
+			if dir.dot(&sel_dir) > 0. && dir.norm() < best.1
+			{
+				best = (i as i32, dir.norm())
+			}
+		}
+		self.selection = best.0;
+
+		if do_swap
+		{
+			let drop_item = {
+				let mut inventory = map.world.get::<&mut comps::Inventory>(map.player).unwrap();
+				inventory.slots[self.selection as usize].take()
+			};
+			if let Some(nearby_item_id) = map.nearby_item
+			{
+				let nearby_item = map.world.remove_one::<comps::Item>(nearby_item_id)?;
+				map.world.despawn(nearby_item_id)?;
+				map.nearby_item = None;
+
+				let mut inventory = map.world.get::<&mut comps::Inventory>(map.player).unwrap();
+				inventory.slots[self.selection as usize] = Some(nearby_item);
+			}
+
+			if let Some(drop_item) = drop_item
+			{
+				let player_pos = map.world.get::<&comps::Position>(map.player).unwrap().pos;
+				let id = spawn_item(
+					player_pos + Vector3::new(0., 5., 0.),
+					Vector3::new(0., 0., 256.),
+					drop_item,
+					&mut map.world,
+				)?;
+				map.nearby_item = Some(id);
+			}
+		}
+
+		Ok(sel_dir.norm() > 0. || do_swap)
+	}
+
+	pub fn logic(&mut self, map: &mut Map, state: &mut game_state::GameState) -> Result<()>
+	{
+		let mut inventory = map.world.get::<&mut comps::Inventory>(map.player).unwrap();
+
+		for slot in &mut inventory.slots
+		{
+			if let Some(slot) = slot
+			{
+				let appearance = &mut slot.appearance;
+				let sprite = state.get_sprite(&appearance.sprite)?;
+				appearance.animation_state.set_new_animation("Default");
+				appearance.speed = 1.;
+				sprite.advance_state(
+					&mut appearance.animation_state,
+					(appearance.speed * DT) as f64,
+				);
+			}
+		}
+		Ok(())
+	}
+
+	pub fn draw(&mut self, map: &Map, state: &game_state::GameState) -> Result<()>
+	{
+		state
+			.core
+			.use_shader(Some(&*state.basic_shader.upgrade().unwrap()))
+			.unwrap();
+		state.core.set_depth_test(None);
+
+		let sprite = state.get_sprite("data/inventory_center_bkg.cfg")?;
+
+		let center = Point2::new(state.buffer_width() / 2., state.buffer_height() / 2.);
+		sprite.draw_frame(center, "Default", 0, state);
+
+		let sprite = state.get_sprite("data/inventory_cell.cfg")?;
+		let inventory = map.world.get::<&comps::Inventory>(map.player).unwrap();
+
+		for (i, cell_offt) in CELL_OFFTS.iter().enumerate()
+		{
+			let frame = if i as i32 == self.selection { 1 } else { 0 };
+			sprite.draw_frame(center + cell_offt, "Default", frame, state);
+		}
+
+		let panel_width = 150.;
+		let panel_height = 160.;
+		let pad = 10.;
+
+		let item_left = state.buffer_width() as f32 - panel_width - pad;
+		let item_right = item_left + panel_width;
+		let item_center = item_left + panel_width / 2.;
+
+		let cur_item_top = state.buffer_height() as f32 / 2. - panel_height - pad / 2.;
+		let cur_item_bottom = cur_item_top + panel_height;
+
+		let ground_item_top = state.buffer_height() as f32 / 2. + pad / 2.;
+		let ground_item_bottom = ground_item_top + panel_height;
+
+		let lh = state.ui_font().get_line_height() as f32 + 2.;
+
+		state.prim.draw_filled_rectangle(
+			item_left,
+			cur_item_top,
+			item_right,
+			cur_item_bottom,
+			Color::from_rgb_f(0., 0., 0.),
+		);
+		state.prim.draw_filled_rectangle(
+			item_left,
+			ground_item_top,
+			item_right,
+			ground_item_bottom,
+			Color::from_rgb_f(0., 0., 0.),
+		);
+
+		let mut text_y = cur_item_top + pad / 2.;
+
+		state.core.draw_text(
+			state.ui_font(),
+			Color::from_rgb_f(1., 1., 1.),
+			item_center,
+			text_y,
+			FontAlign::Centre,
+			"Selected Item",
+		);
+		text_y += lh;
+
+		if let Some(item) = inventory.slots[self.selection as usize].as_ref()
+		{
+			state.core.draw_text(
+				state.ui_font(),
+				Color::from_rgb_f(1., 1., 1.),
+				item_center,
+				text_y,
+				FontAlign::Centre,
+				&item.name,
+			);
+		}
+
+		let mut text_y = ground_item_top + pad / 2.;
+
+		state.core.draw_text(
+			state.ui_font(),
+			Color::from_rgb_f(1., 1., 1.),
+			item_center,
+			text_y,
+			FontAlign::Centre,
+			"Ground Item",
+		);
+		text_y += lh;
+
+		if let Some(item) = map
+			.nearby_item
+			.and_then(|id| map.world.get::<&comps::Item>(id).ok())
+		{
+			state.core.draw_text(
+				state.ui_font(),
+				Color::from_rgb_f(1., 1., 1.),
+				item_center,
+				text_y,
+				FontAlign::Centre,
+				&item.name,
+			);
+		}
+
+		let mut scene = Scene::new();
+		state
+			.core
+			.use_shader(Some(&*state.palette_shader.upgrade().unwrap()))
+			.unwrap();
+
+		for (i, (item, cell_offt)) in inventory.slots.iter().zip(CELL_OFFTS.iter()).enumerate()
+		{
+			if item.is_none()
+			{
+				continue;
+			}
+			let item = item.as_ref().unwrap();
+			let appearance = &item.appearance;
+			let sprite = state.get_sprite(&appearance.sprite)?;
+			let palette_index = state.palettes.get_palette_index(
+				appearance
+					.palette
+					.as_ref()
+					.unwrap_or(&sprite.get_palettes()[0]),
+			)?;
+
+			let pos = center + cell_offt;
+
+			let (atlas_bmp, offt) = sprite.get_frame_from_state(&appearance.animation_state);
+
+			let bob_f = if i as i32 == self.selection { 1. } else { 0. };
+			scene.add_bitmap(
+				Point3::new(
+					pos.x + offt.x,
+					pos.y
+						+ offt.y + (bob_f * 2. * (state.core.get_time() * 8.).cos()).floor() as f32,
+					0.,
+				),
+				atlas_bmp,
+				palette_index,
+				0,
+			);
+		}
+		scene.draw_triangles(state);
+		Ok(())
 	}
 }
 
@@ -303,10 +608,37 @@ impl Scene
 		self.add_indices(&indices[..], bmp.page);
 		self.add_vertices(&vertices[..], bmp.page);
 	}
+
+	pub fn draw_triangles(&self, state: &game_state::GameState)
+	{
+		for (i, page) in state.atlas.pages.iter().enumerate()
+		{
+			if i >= self.buckets.len()
+			{
+				break;
+			}
+			state.prim.draw_indexed_prim(
+				&self.buckets[i].vertices[..],
+				Some(&page.bitmap),
+				&self.buckets[i].indices[..],
+				0,
+				self.buckets[i].indices.len() as u32,
+				PrimType::TriangleList,
+			);
+		}
+	}
 }
 
 fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
 {
+	let mut inventory = comps::Inventory::new();
+
+	inventory.slots[1] = Some(comps::Item {
+		name: "+134 lightning dmg".to_string(),
+		//name: "enemies explode on death".to_string(),
+		appearance: comps::Appearance::new("data/ring_red.cfg"),
+	});
+
 	let entity = world.spawn((
 		comps::Appearance::new("data/player.cfg"),
 		comps::Position::new(pos),
@@ -318,7 +650,7 @@ fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entit
 		},
 		comps::Solid {
 			size: 8.,
-			mass: 1.,
+			mass: 10.,
 			kind: comps::CollisionKind::BigPlayer,
 		},
 		comps::Stats::new(comps::StatValues::new_player()),
@@ -331,6 +663,7 @@ fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entit
 		comps::OnDeathEffect {
 			effects: vec![comps::Effect::SpawnCorpse],
 		},
+		inventory,
 	));
 	Ok(entity)
 }
@@ -352,8 +685,8 @@ fn spawn_enemy(
 		},
 		comps::Solid {
 			size: 8.,
-			mass: 1.,
-			kind: comps::CollisionKind::BigEnemy,
+			mass: 10.,
+			kind: comps::CollisionKind::SmallEnemy,
 		},
 		comps::AI::new(),
 		comps::Stats::new(comps::StatValues::new_enemy()),
@@ -391,7 +724,10 @@ fn spawn_crystal(
 		comps::CastsShadow,
 		comps::Crystal::new(kind),
 		comps::OnDeathEffect {
-			effects: vec![comps::Effect::SpawnPowerSphere(kind)],
+			effects: vec![
+				comps::Effect::SpawnPowerSphere(kind),
+				comps::Effect::SpawnItems(kind),
+			],
 		},
 	));
 	Ok(entity)
@@ -435,10 +771,47 @@ fn spawn_from_crystal(id: hecs::Entity, world: &mut hecs::World) -> Result<()>
 	Ok(())
 }
 
-fn spawn_corpse(
-	pos: Point3<f32>, vel_pos: Vector3<f32>, appearance: comps::Appearance, world: &mut hecs::World,
+fn spawn_item(
+	pos: Point3<f32>, vel_pos: Vector3<f32>, item: comps::Item, world: &mut hecs::World,
 ) -> Result<hecs::Entity>
 {
+	let entity = world.spawn((
+		comps::Appearance::new("data/item.cfg"),
+		comps::Position::new(pos),
+		comps::Velocity { pos: vel_pos },
+		comps::Acceleration {
+			pos: Vector3::zeros(),
+		},
+		comps::AffectedByGravity::new(),
+		comps::CastsShadow,
+		comps::Jump::new(),
+		comps::Solid {
+			size: 8.,
+			mass: 1.,
+			kind: comps::CollisionKind::BigPlayer,
+		},
+		item,
+		comps::Stats::new(comps::StatValues::new_item()),
+		comps::Controller::new(),
+	));
+	Ok(entity)
+}
+
+fn spawn_corpse(
+	pos: Point3<f32>, vel_pos: Vector3<f32>, appearance: comps::Appearance,
+	inventory: comps::Inventory, stats: Option<comps::Stats>, world: &mut hecs::World,
+) -> Result<hecs::Entity>
+{
+	let stats = if let Some(mut stats) = stats
+	{
+		stats.dead = true;
+		stats.damage = 0.;
+		stats
+	}
+	else
+	{
+		comps::Stats::new(comps::StatValues::new_corpse())
+	};
 	let entity = world.spawn((
 		appearance,
 		comps::Position::new(pos),
@@ -454,9 +827,9 @@ fn spawn_corpse(
 			mass: 1.,
 			kind: comps::CollisionKind::SmallPlayer,
 		},
-		// TODO: Surprising amount of components to get friction/gravity working
-		comps::Stats::new(comps::StatValues::new_player()),
+		stats,
 		comps::Controller::new(),
+		inventory,
 	));
 	Ok(entity)
 }
@@ -745,6 +1118,7 @@ struct Map
 	camera_pos: comps::Position,
 	camera_lookahead: Vector2<f32>,
 	show_depth: bool,
+	nearby_item: Option<hecs::Entity>,
 }
 
 impl Map
@@ -756,6 +1130,16 @@ impl Map
 		let spawn_pos = Point3::new(0., 0., 0.);
 
 		let player = spawn_player(spawn_pos, &mut world)?;
+
+		spawn_item(
+			Point3::new(32., 0., 0.),
+			Vector3::new(0., 0., 128.),
+			comps::Item {
+				name: "Ground item".into(),
+				appearance: comps::Appearance::new("data/ring_red.cfg"),
+			},
+			&mut world,
+		)?;
 
 		let crystal = spawn_crystal(
 			Point3::new(300., 300., 0.),
@@ -790,6 +1174,7 @@ impl Map
 			camera_pos: comps::Position::new(spawn_pos),
 			camera_lookahead: Vector2::zeros(),
 			show_depth: false,
+			nearby_item: None,
 		})
 	}
 
@@ -809,6 +1194,7 @@ impl Map
 		-> Result<Option<game_state::NextScreen>>
 	{
 		let mut to_die = vec![];
+		let mut rng = thread_rng();
 
 		// Position snapshotting.
 		for (_, position) in self.world.query::<&mut comps::Position>().iter()
@@ -816,6 +1202,10 @@ impl Map
 			position.snapshot();
 		}
 		self.camera_pos.snapshot();
+		if state.paused
+		{
+			return Ok(None);
+		}
 
 		// Stats.
 		for (_, (stats, attack)) in self
@@ -831,28 +1221,36 @@ impl Map
 		}
 
 		// Input.
-		if let Ok(controller) = self
+		if let Ok((controller, stats)) = self
 			.world
-			.query_one_mut::<&mut comps::Controller>(self.player)
+			.query_one_mut::<(&mut comps::Controller, &comps::Stats)>(self.player)
 		{
-			controller.want_attack = state
-				.controls
-				.get_action_state(controls::Action::BladeBlade)
-				> 0.5;
+			if !stats.dead
+			{
+				controller.want_attack = state
+					.controls
+					.get_action_state(controls::Action::BladeBlade)
+					> 0.5;
 
-			let dx = state.controls.get_action_state(controls::Action::MoveRight)
-				- state.controls.get_action_state(controls::Action::MoveLeft);
-			let dy = state.controls.get_action_state(controls::Action::MoveDown)
-				- state.controls.get_action_state(controls::Action::MoveUp);
-			controller.want_move = Vector2::new(dx, dy);
-			controller.want_jump = state.controls.get_action_state(controls::Action::Jump) > 0.5;
+				let dx = state.controls.get_action_state(controls::Action::MoveRight)
+					- state.controls.get_action_state(controls::Action::MoveLeft);
+				let dy = state.controls.get_action_state(controls::Action::MoveDown)
+					- state.controls.get_action_state(controls::Action::MoveUp);
+				controller.want_move = Vector2::new(dx, dy);
+				controller.want_jump =
+					state.controls.get_action_state(controls::Action::Jump) > 0.5;
+			}
 		}
 
 		// AI
-		let mut rng = thread_rng();
-		for (_, (position, ai, controller)) in self
+		for (_, (position, ai, controller, stats)) in self
 			.world
-			.query::<(&mut comps::Position, &mut comps::AI, &mut comps::Controller)>()
+			.query::<(
+				&mut comps::Position,
+				&mut comps::AI,
+				&mut comps::Controller,
+				&comps::Stats,
+			)>()
 			.iter()
 		{
 			let idle_time = 3.;
@@ -886,6 +1284,13 @@ impl Map
 				if !self.world.contains(cur_target)
 				{
 					target = None;
+				}
+				if let Ok(target_stats) = self.world.get::<&comps::Stats>(cur_target)
+				{
+					if !stats.values.team.can_damage(target_stats.values.team)
+					{
+						target = None;
+					}
 				}
 			}
 
@@ -1172,6 +1577,22 @@ impl Map
 			appearance.animation_state.set_new_animation("Dead");
 			appearance.speed = 1.;
 		}
+		for (id, (appearance, _)) in self
+			.world
+			.query::<(&mut comps::Appearance, &comps::Item)>()
+			.iter()
+		{
+			let animation = if Some(id) == self.nearby_item
+			{
+				"Nearby"
+			}
+			else
+			{
+				"Default"
+			};
+			appearance.animation_state.set_new_animation(animation);
+			appearance.speed = 1.;
+		}
 		for (_, appearance) in self.world.query::<&mut comps::Appearance>().iter()
 		{
 			let sprite = state.get_sprite(&appearance.sprite)?;
@@ -1182,7 +1603,7 @@ impl Map
 		}
 
 		// Attacking.
-		let mut spawn_fns: Vec<Box<dyn FnOnce(&mut hecs::World) -> Result<hecs::Entity>>> = vec![];
+		let mut spawn_fns: Vec<Box<dyn FnOnce(&mut Map) -> Result<hecs::Entity>>> = vec![];
 		let mut blade_blade_activations = vec![];
 		for (id, (appearance, position, attack, stats)) in self
 			.world
@@ -1206,13 +1627,13 @@ impl Map
 							// TODO: Spawn position?
 							let pos = position.pos.clone();
 							let time = state.time();
-							spawn_fns.push(Box::new(move |world: &mut hecs::World| {
+							spawn_fns.push(Box::new(move |map| {
 								spawn_fireball(
 									pos + Vector3::new(0., 0., 16.),
 									dir * 100.,
 									dir * 100.,
 									time,
-									world,
+									&mut map.world,
 								)
 							}));
 						}
@@ -1247,6 +1668,59 @@ impl Map
 			{
 				to_die.push((true, id));
 			}
+		}
+
+		// Item jumping...
+		for (_, (_, controller)) in self
+			.world
+			.query::<(&comps::Item, &mut comps::Controller)>()
+			.iter()
+		{
+			if rng.gen_bool((128. * -DT as f64).exp())
+			{
+				controller.want_jump = true;
+			}
+			else
+			{
+				controller.want_jump = false;
+			}
+		}
+
+		// Item pickup.
+		let mut player_pos = None;
+		if let Ok(position) = self.world.query_one_mut::<&comps::Position>(self.player)
+		{
+			player_pos = Some(position.pos);
+		}
+		if let Some(player_pos) = player_pos
+		{
+			let mut best = None;
+			for (id, (position, _)) in self
+				.world
+				.query::<(&comps::Position, &comps::Item)>()
+				.iter()
+			{
+				let dist = (player_pos - position.pos).norm();
+				if dist < 32.
+				{
+					if let Some((_, best_dist)) = best
+					{
+						if dist < best_dist
+						{
+							best = Some((id, best_dist))
+						}
+					}
+					else
+					{
+						best = Some((id, dist));
+					}
+				}
+			}
+			self.nearby_item = best.map(|v| v.0);
+		}
+		else
+		{
+			self.nearby_item = None;
 		}
 
 		// Gravity.
@@ -1516,7 +1990,7 @@ impl Map
 							.unwrap()
 							.get()
 						{
-							other_stats.values.team != stats.values.team
+							stats.values.team.can_damage(other_stats.values.team)
 						}
 						else
 						{
@@ -1620,23 +2094,40 @@ impl Map
 
 						if let Some(pos) = pos
 						{
-							spawn_fns.push(Box::new(move |world: &mut hecs::World| {
-								spawn_fire_hit(pos, world)
-							}));
+							spawn_fns
+								.push(Box::new(move |map| spawn_fire_hit(pos, &mut map.world)));
 						}
 					}
-					(comps::Effect::DoDamage(damage, team), Some(other_id)) =>
+					(comps::Effect::DoDamage(damage, team), other_id) =>
 					{
-						if let Ok(stats) = self.world.query_one_mut::<&mut comps::Stats>(other_id)
+						if let Some(other_id) = other_id
 						{
-							if stats.values.team != team
+							if let Ok(stats) =
+								self.world.query_one_mut::<&mut comps::Stats>(other_id)
 							{
-								stats.apply_damage(damage);
+								if team.can_damage(stats.values.team)
+								{
+									stats.apply_damage(damage);
+								}
 							}
 						}
 					}
 					(comps::Effect::SpawnCorpse, _) =>
 					{
+						let inventory = if let Ok(inventory) =
+							self.world.query_one_mut::<&comps::Inventory>(id)
+						{
+							inventory.clone()
+						}
+						else
+						{
+							comps::Inventory::new()
+						};
+						let stats = self
+							.world
+							.query_one_mut::<&comps::Stats>(id)
+							.ok()
+							.map(|s| s.clone());
 						if let Ok((position, appearance, velocity)) =
 							self.world
 								.query_one_mut::<(&comps::Position, &comps::Appearance, &comps::Velocity)>(
@@ -1647,8 +2138,20 @@ impl Map
 							let vel_pos = velocity.pos.clone();
 							let mut appearance = appearance.clone();
 							appearance.bias = -1;
-							spawn_fns.push(Box::new(move |world: &mut hecs::World| {
-								spawn_corpse(pos, vel_pos, appearance, world)
+							spawn_fns.push(Box::new(move |map| {
+								let corpse_id = spawn_corpse(
+									pos,
+									vel_pos,
+									appearance,
+									inventory,
+									stats,
+									&mut map.world,
+								)?;
+								if id == map.player
+								{
+									map.player = corpse_id;
+								};
+								Ok(corpse_id)
 							}));
 						}
 					}
@@ -1668,12 +2171,12 @@ impl Map
 						}
 						if let (Some(pos), Some(target)) = (src_pos, crystal_pos)
 						{
-							spawn_fns.push(Box::new(move |world: &mut hecs::World| {
+							spawn_fns.push(Box::new(move |map| {
 								spawn_soul(
 									pos + Vector3::new(0., 0., 16.),
 									target + Vector3::new(0., 0., 16.),
 									crystal_id,
-									world,
+									&mut map.world,
 								)
 							}));
 						}
@@ -1708,12 +2211,12 @@ impl Map
 						{
 							for (id, target) in sphere_spawns
 							{
-								spawn_fns.push(Box::new(move |world: &mut hecs::World| {
+								spawn_fns.push(Box::new(move |map| {
 									spawn_power_sphere(
 										pos + Vector3::new(0., 0., 16.),
 										target + Vector3::new(0., 0., 16.),
 										id,
-										world,
+										&mut map.world,
 									)
 								}));
 							}
@@ -1724,18 +2227,40 @@ impl Map
 						if let Ok(crystal) =
 							self.world.query_one_mut::<&mut comps::Crystal>(crystal_id)
 						{
-							crystal.level += 1;
+							crystal.level = utils::min(7, crystal.level + 1);
 						}
 						spawn_from_crystal(crystal_id, &mut self.world)?;
 					}
-					_ => panic!(),
+					(comps::Effect::SpawnItems(_kind), _) =>
+					{
+						if let Ok(position) = self.world.query_one_mut::<&comps::Position>(id)
+						{
+							let pos = position.pos
+								+ Vector3::new(
+									rng.gen_range(-4.0..4.0),
+									rng.gen_range(-4.0..4.0),
+									0.,
+								);
+							spawn_fns.push(Box::new(move |map| {
+								spawn_item(
+									pos,
+									Vector3::new(0., 0., 256.),
+									comps::Item {
+										name: "Spawned item".into(),
+										appearance: comps::Appearance::new("data/ring_red.cfg"),
+									},
+									&mut map.world,
+								)
+							}));
+						}
+					}
 				}
 			}
 		}
 
 		for spawn_fn in spawn_fns
 		{
-			spawn_fn(&mut self.world)?;
+			spawn_fn(self)?;
 		}
 
 		// Remove dead entities
@@ -1778,10 +2303,20 @@ impl Map
 
 		// Tiles and appearances
 		let mut scene = Scene::new();
+		// TODO: Move the shader setup somewhere better.
 		state
 			.core
 			.use_shader(Some(&*state.palette_shader.upgrade().unwrap()))
 			.unwrap();
+		state.core.set_shader_uniform("use_texture", &[1][..]).ok();
+		state
+			.core
+			.set_shader_uniform("show_depth", &[self.show_depth as i32 as f32][..])
+			.ok();
+		state
+			.core
+			.set_shader_sampler("palette", &state.palettes.palette_bitmap, 2)
+			.ok();
 
 		for chunk in self.chunks.iter_mut()
 		{
@@ -1803,16 +2338,6 @@ impl Map
 					.as_ref()
 					.unwrap_or(&sprite.get_palettes()[0]),
 			)?;
-
-			state.core.set_shader_uniform("use_texture", &[1][..]).ok();
-			state
-				.core
-				.set_shader_uniform("show_depth", &[self.show_depth as i32 as f32][..])
-				.ok();
-			state
-				.core
-				.set_shader_sampler("palette", &state.palettes.palette_bitmap, 2)
-				.ok();
 
 			let draw_pos = position.draw_pos(state.alpha);
 			let pos = utils::round_point(
@@ -1893,17 +2418,7 @@ impl Map
 			);
 		}
 
-		for (i, page) in state.atlas.pages.iter().enumerate()
-		{
-			state.prim.draw_indexed_prim(
-				&scene.buckets[i].vertices[..],
-				Some(&page.bitmap),
-				&scene.buckets[i].indices[..],
-				0,
-				scene.buckets[i].indices.len() as u32,
-				PrimType::TriangleList,
-			);
-		}
+		scene.draw_triangles(state);
 
 		state
 			.core

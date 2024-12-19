@@ -25,7 +25,9 @@ fn default_false() -> bool
 struct SpriteDesc
 {
 	bitmap: String,
+	#[serde(default)]
 	width: i32,
+	#[serde(default)]
 	height: i32,
 	#[serde(default)]
 	center_offt_x: i32,
@@ -69,6 +71,14 @@ impl Sprite
 		{
 			utils::load_bitmap(&core, &desc.bitmap)?
 		};
+		if desc.width == 0
+		{
+			desc.width = bitmap.get_width();
+		}
+		if desc.height == 0
+		{
+			desc.height = bitmap.get_height();
+		}
 
 		let num_frames_y = bitmap.get_height() / desc.height;
 		let num_frames_x = bitmap.get_width() / desc.width;

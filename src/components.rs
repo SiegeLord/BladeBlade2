@@ -189,6 +189,20 @@ pub enum Team
 {
 	Player,
 	Enemy,
+	Neutral,
+}
+
+impl Team
+{
+	pub fn can_damage(&self, other: Team) -> bool
+	{
+		match (self, other)
+		{
+			(Team::Player, Team::Enemy) => true,
+			(Team::Enemy, Team::Player) => true,
+			_ => false,
+		}
+	}
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -254,8 +268,28 @@ impl StatValues
 			..Self::default()
 		}
 	}
+
+	pub fn new_item() -> Self
+	{
+		Self {
+			speed: 256.,
+			team: Team::Neutral,
+			jump_strength: 128.,
+			..Self::default()
+		}
+	}
+
+	pub fn new_corpse() -> Self
+	{
+		Self {
+			speed: 256.,
+			team: Team::Neutral,
+			..Self::default()
+		}
+	}
 }
 
+#[derive(Debug, Clone)]
 pub struct Stats
 {
 	pub base_values: StatValues,
@@ -263,6 +297,7 @@ pub struct Stats
 
 	pub attacking: bool,
 	pub damage: f32,
+	pub dead: bool,
 }
 
 impl Stats
@@ -274,6 +309,7 @@ impl Stats
 			values: base_values,
 			attacking: false,
 			damage: 0.,
+			dead: false,
 		}
 	}
 
@@ -284,6 +320,10 @@ impl Stats
 		{
 			self.values.acceleration = 0.;
 			self.values.jump_strength = 0.;
+		}
+		if self.dead
+		{
+			self.values.team = Team::Neutral;
 		}
 		self.values.health -= self.damage;
 	}
@@ -376,6 +416,7 @@ pub enum Effect
 	UnlockCrystal(hecs::Entity),
 	SpawnPowerSphere(ItemKind),
 	ElevateCrystal(hecs::Entity),
+	SpawnItems(ItemKind),
 }
 
 #[derive(Debug, Clone)]
@@ -492,6 +533,29 @@ impl Crystal
 			kind: kind,
 			level: 0,
 			enemies: 0,
+		}
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct Item
+{
+	pub name: String,
+	pub appearance: Appearance,
+}
+
+#[derive(Debug, Clone)]
+pub struct Inventory
+{
+	pub slots: [Option<Item>; 6],
+}
+
+impl Inventory
+{
+	pub fn new() -> Self
+	{
+		Self {
+			slots: [None, None, None, None, None, None],
 		}
 	}
 }

@@ -14,6 +14,7 @@ pub enum Action
 	MoveDown,
 	Jump,
 	BladeBlade,
+	Inventory,
 }
 
 impl Action
@@ -28,6 +29,7 @@ impl Action
 			Action::MoveDown => "Move Down",
 			Action::Jump => "Jump",
 			Action::BladeBlade => "BladeBlade",
+			Action::Inventory => "Show Inventory",
 		}
 	}
 }
@@ -526,6 +528,13 @@ impl Controls
 				Some(Input::Keyboard(allegro::KeyCode::LCtrl)),
 			],
 		);
+		action_to_inputs.insert(
+			Action::Inventory,
+			[
+				Some(Input::Keyboard(allegro::KeyCode::Tab)),
+				Some(Input::Keyboard(allegro::KeyCode::I)),
+			],
+		);
 
 		Self {
 			action_to_inputs: action_to_inputs,
@@ -731,6 +740,20 @@ impl ControlsHandler
 	pub fn clear_action_state(&mut self, action: Action)
 	{
 		if let Some(inputs) = self.controls.action_to_inputs.get(&action)
+		{
+			for input in &inputs[..]
+			{
+				if let Some(input) = input
+				{
+					self.input_state.get_mut(input).unwrap().clear();
+				}
+			}
+		}
+	}
+
+	pub fn clear_action_states(&mut self)
+	{
+		for inputs in self.controls.action_to_inputs.values()
 		{
 			for input in &inputs[..]
 			{
