@@ -12,9 +12,17 @@ void main()
 {
 	float color_idx = texture2D(al_tex, varying_texcoord).r;
 	float palette_index = varying_material.x;
+	float material = varying_material.y;
 	if (color_idx == 0.0)
 		discard;
 	vec4 color = texture2D(palette, vec2(color_idx, 1. - palette_index / 255.));
+
+	if (material == 1.0)
+	{
+		float b = 0.30 * color.r + 0.59 * color.g + 0.11 * color.b;
+		color = vec4(0.1 * b, 0.1 * b, b, color.a);
+	}
+
 	//vec4 color = texture2D(palette, vec2(5. / 255., 1.));
 	//vec4 color = vec4(1.);
 	//vec4 color = vec4(color_idx * 32.);

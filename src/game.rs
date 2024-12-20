@@ -49,6 +49,8 @@ impl Game
 		state.cache_sprite("data/inventory_cell.cfg")?;
 		state.cache_sprite("data/ring_red.cfg")?;
 		state.cache_sprite("data/item.cfg")?;
+		state.cache_sprite("data/shocked.cfg")?;
+		state.cache_sprite("data/ignited.cfg")?;
 
 		Ok(Self {
 			map: Map::new(state)?,
@@ -249,7 +251,7 @@ impl InventoryScreen
 	}
 
 	pub fn input(
-		&mut self, event: &Event, map: &mut Map, _state: &mut game_state::GameState,
+		&mut self, event: &Event, map: &mut Map, state: &mut game_state::GameState,
 	) -> Result<bool>
 	{
 		// LOL!
@@ -320,7 +322,7 @@ impl InventoryScreen
 				.world
 				.query_one_mut::<(&comps::Inventory, &mut comps::Stats)>(map.player)
 			{
-				stats.reset(Some(inventory))
+				stats.reset(state, Some(inventory))
 			}
 		}
 
@@ -1014,6 +1016,7 @@ fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entit
 	let inventory = comps::Inventory::new();
 	let entity = world.spawn((
 		comps::Appearance::new("data/player.cfg"),
+		comps::StatusAppearance::new(),
 		comps::Position::new(pos),
 		comps::Velocity {
 			pos: Vector3::zeros(),
@@ -1049,6 +1052,7 @@ fn spawn_enemy(
 	appearance.palette = Some("data/player_pal2.png".to_string());
 	let entity = world.spawn((
 		appearance,
+		comps::StatusAppearance::new(),
 		comps::Position::new(pos),
 		comps::Velocity {
 			pos: Vector3::zeros(),
@@ -1604,7 +1608,7 @@ impl Map
 			if stats.life > 0.
 			{
 				let inventory = self.world.get::<&comps::Inventory>(id).ok();
-				stats.reset(inventory.as_deref());
+				stats.reset(state, inventory.as_deref());
 				stats.logic(state);
 			}
 			else
@@ -1646,6 +1650,10 @@ impl Map
 			)>()
 			.iter()
 		{
+			if stats.freeze_time > state.time()
+			{
+				continue;
+			}
 			let idle_time = 3.;
 			let wander_time = 0.5;
 			let chase_time = 1.;
@@ -1991,8 +1999,39 @@ impl Map
 			appearance.animation_state.set_new_animation(animation);
 			appearance.speed = 1.;
 		}
+		for (_, (appearance, stats)) in self
+			.world
+			.query::<(&mut comps::Appearance, &comps::Stats)>()
+			.iter()
+		{
+			if stats.freeze_time > state.time()
+			{
+				appearance.material = comps::Material::Frozen;
+				appearance.speed = 0.;
+			}
+			else
+			{
+				appearance.material = comps::Material::Default;
+			}
+		}
 		for (_, appearance) in self.world.query::<&mut comps::Appearance>().iter()
 		{
+			let sprite = state.get_sprite(&appearance.sprite)?;
+			sprite.advance_state(
+				&mut appearance.animation_state,
+				(appearance.speed * DT) as f64,
+			);
+		}
+		for (_, status_appearance) in self.world.query::<&mut comps::StatusAppearance>().iter()
+		{
+			let appearance = &mut status_appearance.shocked;
+			let sprite = state.get_sprite(&appearance.sprite)?;
+			sprite.advance_state(
+				&mut appearance.animation_state,
+				(appearance.speed * DT) as f64,
+			);
+
+			let appearance = &mut status_appearance.ignited;
 			let sprite = state.get_sprite(&appearance.sprite)?;
 			sprite.advance_state(
 				&mut appearance.animation_state,
@@ -2518,7 +2557,7 @@ impl Map
 								if team.can_damage(stats.values.team)
 								{
 									let (new_life_leech, new_mana_leech) =
-										stats.apply_damage(&damage_stat_values, &mut rng);
+										stats.apply_damage(&damage_stat_values, state, &mut rng);
 									life_leech = new_life_leech;
 									mana_leech = new_mana_leech;
 								}
@@ -2529,7 +2568,7 @@ impl Map
 							if life_leech > 0.
 							{
 								let duration = 4. * stats.values.skill_duration;
-								stats.life_leech_instances.push(comps::LeechInstance {
+								stats.life_leech_instances.push(comps::RateInstance {
 									rate: life_leech / duration * DT,
 									time_to_remove: state.time() + duration as f64,
 								});
@@ -2537,7 +2576,7 @@ impl Map
 							if mana_leech > 0.
 							{
 								let duration = 4. * stats.values.skill_duration;
-								stats.mana_leech_instances.push(comps::LeechInstance {
+								stats.mana_leech_instances.push(comps::RateInstance {
 									rate: mana_leech / duration * DT,
 									time_to_remove: state.time() + duration as f64,
 								});
@@ -2560,31 +2599,40 @@ impl Map
 							.query_one_mut::<&comps::Stats>(id)
 							.ok()
 							.map(|s| s.clone());
-						if let Ok((position, appearance, velocity)) =
-							self.world
+						let frozen = stats
+							.as_ref()
+							.map(|s| s.freeze_time > state.time())
+							.unwrap_or(false);
+
+						// Always leave a corpse for the player...
+						if !frozen || id == self.player
+						{
+							if let Ok((position, appearance, velocity)) = self
+								.world
 								.query_one_mut::<(&comps::Position, &comps::Appearance, &comps::Velocity)>(
 									id,
 								)
-						{
-							let pos = position.pos.clone();
-							let vel_pos = velocity.pos.clone();
-							let mut appearance = appearance.clone();
-							appearance.bias = -1;
-							spawn_fns.push(Box::new(move |map| {
-								let corpse_id = spawn_corpse(
-									pos,
-									vel_pos,
-									appearance,
-									inventory,
-									stats,
-									&mut map.world,
-								)?;
-								if id == map.player
-								{
-									map.player = corpse_id;
-								};
-								Ok(corpse_id)
-							}));
+							{
+								let pos = position.pos.clone();
+								let vel_pos = velocity.pos.clone();
+								let mut appearance = appearance.clone();
+								appearance.bias = -1;
+								spawn_fns.push(Box::new(move |map| {
+									let corpse_id = spawn_corpse(
+										pos,
+										vel_pos,
+										appearance,
+										inventory,
+										stats,
+										&mut map.world,
+									)?;
+									if id == map.player
+									{
+										map.player = corpse_id;
+									};
+									Ok(corpse_id)
+								}));
+							}
 						}
 					}
 					(comps::Effect::SpawnSoul(crystal_id), _) =>
@@ -2787,8 +2835,74 @@ impl Map
 				),
 				atlas_bmp,
 				palette_index,
-				0,
+				appearance.material as i32,
 			);
+		}
+
+		// Status effects.
+		for (_, (status_appearance, position, stats)) in
+			self.world
+				.query_mut::<(&comps::StatusAppearance, &comps::Position, &comps::Stats)>()
+		{
+			if !stats.shock_instances.is_empty()
+			{
+				let appearance = &status_appearance.shocked;
+				let sprite = state.get_sprite(&appearance.sprite)?;
+				let palette_index = state.palettes.get_palette_index(
+					appearance
+						.palette
+						.as_ref()
+						.unwrap_or(&sprite.get_palettes()[0]),
+				)?;
+
+				let draw_pos = position.draw_pos(state.alpha);
+				let pos = utils::round_point(
+					Point2::new(draw_pos.x, draw_pos.y - draw_pos.z) + camera_shift,
+				);
+
+				let (atlas_bmp, offt) = sprite.get_frame_from_state(&appearance.animation_state);
+
+				scene.add_bitmap(
+					Point3::new(
+						pos.x + offt.x,
+						pos.y + offt.y,
+						position.pos.y - self.camera_pos.pos.y + appearance.bias as f32,
+					),
+					atlas_bmp,
+					palette_index,
+					appearance.material as i32,
+				);
+			}
+
+			if !stats.ignite_instances.is_empty()
+			{
+				let appearance = &status_appearance.ignited;
+				let sprite = state.get_sprite(&appearance.sprite)?;
+				let palette_index = state.palettes.get_palette_index(
+					appearance
+						.palette
+						.as_ref()
+						.unwrap_or(&sprite.get_palettes()[0]),
+				)?;
+
+				let draw_pos = position.draw_pos(state.alpha);
+				let pos = utils::round_point(
+					Point2::new(draw_pos.x, draw_pos.y - draw_pos.z) + camera_shift,
+				);
+
+				let (atlas_bmp, offt) = sprite.get_frame_from_state(&appearance.animation_state);
+
+				scene.add_bitmap(
+					Point3::new(
+						pos.x + offt.x,
+						pos.y + offt.y,
+						position.pos.y - self.camera_pos.pos.y + appearance.bias as f32,
+					),
+					atlas_bmp,
+					palette_index,
+					0,
+				);
+			}
 		}
 
 		// Crystal pips.

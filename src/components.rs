@@ -1,4 +1,5 @@
 use crate::error::Result;
+use crate::utils::DT;
 use crate::{game_state, sprite, utils};
 use allegro::*;
 use na::{Point3, Vector2, Vector3};
@@ -48,12 +49,21 @@ pub struct Acceleration
 	pub pos: Vector3<f32>,
 }
 
+#[derive(Debug, Copy, Clone)]
+#[repr(i32)]
+pub enum Material
+{
+	Default = 0,
+	Frozen = 1,
+}
+
 #[derive(Debug, Clone)]
 pub struct Appearance
 {
 	pub sprite: String,
 	pub palette: Option<String>,
 	pub animation_state: sprite::AnimationState,
+	pub material: Material,
 	pub speed: f32,
 	pub bias: i32,
 }
@@ -67,7 +77,30 @@ impl Appearance
 			palette: None,
 			animation_state: sprite::AnimationState::new("Default"),
 			speed: 1.,
+			material: Material::Default,
 			bias: 0,
+		}
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct StatusAppearance
+{
+	pub shocked: Appearance,
+	pub ignited: Appearance,
+}
+
+impl StatusAppearance
+{
+	pub fn new() -> Self
+	{
+		let mut shocked = Appearance::new("data/shocked.cfg");
+		shocked.bias = 1;
+		let mut ignited = Appearance::new("data/ignited.cfg");
+		ignited.bias = 1;
+		Self {
+			shocked: shocked,
+			ignited: ignited,
 		}
 	}
 }
@@ -306,8 +339,13 @@ impl StatValues
 
 			critical_chance: 0.05,
 			critical_multiplier: 2.,
-			physical_damage: 10.,
-
+			//physical_damage: 10.,
+			//fire_damage: 5.,
+			//chance_to_ignite: 1.,
+			//lightning_damage: 5.,
+			//chance_to_shock: 1.,
+			//cold_damage: 5.,
+			//chance_to_freeze: 1.,
 			..Self::default()
 		}
 	}
@@ -317,14 +355,22 @@ impl StatValues
 		Self {
 			speed: 64.,
 			acceleration: 1024.,
-			skill_duration: 0.25,
-			max_life: 50.,
+			skill_duration: 1.,
+			max_life: 150.,
 			mana_regen: 100.,
 			max_mana: 100.,
 			cast_speed: 1.,
 			physical_damage: 4.,
 			critical_chance: 0.05,
 			critical_multiplier: 1.5,
+
+			cold_damage: 10.,
+			fire_damage: 4.,
+			lightning_damage: 4.,
+
+			chance_to_ignite: 0.5,
+			chance_to_freeze: 0.5,
+			chance_to_shock: 0.5,
 			..Self::default()
 		}
 	}
@@ -362,7 +408,7 @@ impl StatValues
 }
 
 #[derive(Debug, Clone)]
-pub struct LeechInstance
+pub struct RateInstance
 {
 	pub rate: f32,
 	pub time_to_remove: f64,
@@ -381,8 +427,12 @@ pub struct Stats
 	pub old_max_mana: f32,
 	pub dead: bool,
 
-	pub life_leech_instances: Vec<LeechInstance>,
-	pub mana_leech_instances: Vec<LeechInstance>,
+	pub life_leech_instances: Vec<RateInstance>,
+	pub mana_leech_instances: Vec<RateInstance>,
+
+	pub ignite_instances: Vec<RateInstance>,
+	pub shock_instances: Vec<RateInstance>,
+	pub freeze_time: f64,
 }
 
 impl Stats
@@ -400,10 +450,13 @@ impl Stats
 			dead: false,
 			life_leech_instances: vec![],
 			mana_leech_instances: vec![],
+			ignite_instances: vec![],
+			shock_instances: vec![],
+			freeze_time: 0.,
 		}
 	}
 
-	pub fn reset(&mut self, inventory: Option<&Inventory>)
+	pub fn reset(&mut self, state: &mut game_state::GameState, inventory: Option<&Inventory>)
 	{
 		self.values = self.base_values;
 		if let Some(inventory) = inventory
@@ -515,11 +568,23 @@ impl Stats
 		if self.dead
 		{
 			self.values.team = Team::Neutral;
+			self.life = 1.;
+		}
+		if self.freeze_time > state.time()
+		{
+			self.values.cast_speed = 0.;
+			self.values.acceleration = 0.;
 		}
 	}
 
-	pub fn apply_damage(&mut self, values: &StatValues, rng: &mut impl Rng) -> (f32, f32)
+	pub fn apply_damage(
+		&mut self, values: &StatValues, state: &mut game_state::GameState, rng: &mut impl Rng,
+	) -> (f32, f32)
 	{
+		if self.dead
+		{
+			return (0., 0.);
+		}
 		let (crit, damage_mult) = if rng.gen_bool(values.critical_chance as f64)
 		{
 			(true, values.critical_multiplier)
@@ -529,9 +594,64 @@ impl Stats
 			(false, 1.)
 		};
 
+		let shock_damage = (1. - self.values.lightning_resistance)
+			* self
+				.shock_instances
+				.iter()
+				.map(|li| li.rate)
+				.reduce(utils::max)
+				.unwrap_or(0.);
+		let shock_effect = shock_damage / self.values.max_life;
+
+		let damage_mult = if shock_effect > 0.
+		{
+			damage_mult * (1. + shock_effect)
+		}
+		else
+		{
+			damage_mult
+		};
+
+		if values.cold_damage > 0. && (crit || rng.gen_bool(values.chance_to_freeze as f64))
+		{
+			let freeze_duration = 10.
+				* damage_mult
+				* values.skill_duration
+				* values.cold_damage
+				* (1. - self.values.cold_resistance)
+				/ self.values.max_life;
+			if freeze_duration > 0.1
+			{
+				self.freeze_time = state.time() + freeze_duration as f64;
+			}
+		}
+		if values.fire_damage > 0. && (crit || rng.gen_bool(values.chance_to_ignite as f64))
+		{
+			let ignite_duration = values.skill_duration * 2.;
+			self.ignite_instances.push(RateInstance {
+				rate: damage_mult * values.fire_damage * DT,
+				time_to_remove: state.time() + ignite_duration as f64,
+			});
+		}
+		if values.lightning_damage > 0. && (crit || rng.gen_bool(values.chance_to_shock as f64))
+		{
+			let shock_duration = values.skill_duration * 2.;
+			self.shock_instances.push(RateInstance {
+				rate: damage_mult * values.lightning_damage,
+				time_to_remove: state.time() + shock_duration as f64,
+			});
+		}
+
 		let scaled_armor = self.values.armor * 10.;
-		let physical_damage = values.physical_damage * values.physical_damage
-			/ (values.physical_damage + scaled_armor);
+		let physical_damage = if values.physical_damage > 0.
+		{
+			values.physical_damage * values.physical_damage
+				/ (values.physical_damage + scaled_armor)
+		}
+		else
+		{
+			0.
+		};
 		let damage = physical_damage * (1. - self.values.physical_resistance)
 			+ values.cold_damage * (1. - self.values.cold_resistance)
 			+ values.fire_damage * (1. - self.values.fire_resistance)
@@ -549,6 +669,10 @@ impl Stats
 			.retain_mut(|li| li.time_to_remove > state.time());
 		self.mana_leech_instances
 			.retain_mut(|li| li.time_to_remove > state.time());
+		self.ignite_instances
+			.retain_mut(|li| li.time_to_remove > state.time());
+		self.shock_instances
+			.retain_mut(|li| li.time_to_remove > state.time());
 
 		let life_leech = self
 			.life_leech_instances
@@ -562,8 +686,14 @@ impl Stats
 			.map(|li| li.rate)
 			.reduce(utils::max)
 			.unwrap_or(0.);
+		let ignite_damage = self
+			.ignite_instances
+			.iter()
+			.map(|li| li.rate)
+			.reduce(utils::max)
+			.unwrap_or(0.);
 
-		self.life += life_leech;
+		self.life += life_leech - ignite_damage * (1. - self.values.fire_resistance);
 		self.mana += mana_leech;
 
 		if self.life >= self.values.max_life
@@ -574,11 +704,10 @@ impl Stats
 		{
 			self.mana_leech_instances.clear();
 		}
-		let dt = utils::DT;
-		self.life += self.values.life_regen * dt;
-		self.mana += self.values.mana_regen * dt;
-		self.life = utils::min(self.values.max_life, self.life);
-		self.mana = utils::min(self.values.max_mana, self.mana);
+		self.life += self.values.life_regen * DT;
+		self.mana += self.values.mana_regen * DT;
+		self.life = utils::clamp(self.life, 0., self.values.max_life);
+		self.mana = utils::clamp(self.mana, 0., self.values.max_mana);
 	}
 }
 
