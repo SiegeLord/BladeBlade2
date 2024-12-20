@@ -70,11 +70,13 @@ impl Game
 				if self.inventory_screen.is_none()
 				{
 					self.inventory_screen = Some(InventoryScreen::new(&self.map));
+					self.map.inventory_shown = true;
 					state.paused = true;
 				}
 				else
 				{
 					self.inventory_screen = None;
+					self.map.inventory_shown = false;
 					state.controls.clear_action_states();
 					state.paused = false;
 				}
@@ -372,9 +374,10 @@ impl InventoryScreen
 		let panel_height = 160.;
 		let pad = 4.;
 		let phys = Color::from_rgb_f(0.9, 0.9, 0.9);
-		let fire = Color::from_rgb_f(0.9, 0.1, 0.1);
-		let lightning = Color::from_rgb_f(0.9, 0.9, 0.1);
-		let cold = Color::from_rgb_f(0.1, 0.1, 0.9);
+		let fire = Color::from_rgb_f(0.9, 0.3, 0.3);
+		let lightning = Color::from_rgb_f(0.9, 0.9, 0.3);
+		let cold = Color::from_rgb_f(0.3, 0.3, 0.9);
+
 		let magic = Color::from_rgb_f(0.3, 0.3, 0.9);
 		let rare = Color::from_rgb_f(0.9, 0.9, 0.3);
 
@@ -417,9 +420,9 @@ impl InventoryScreen
 			text_y,
 			FontAlign::Left,
 			&format!(
-				"Health: {} + {}/s",
-				stats.values.max_health as i32,
-				utils::nice_float(stats.values.max_health * stats.values.health_regen, 0)
+				"Life: {} + {}/s",
+				stats.values.max_life as i32,
+				utils::nice_float(stats.values.life_regen, 0)
 			),
 		);
 		text_y += lh;
@@ -433,7 +436,7 @@ impl InventoryScreen
 			&format!(
 				"Mana: {} + {}/s",
 				stats.values.max_mana as i32,
-				utils::nice_float(stats.values.max_mana * stats.values.mana_regen, 0)
+				utils::nice_float(stats.values.mana_regen, 0)
 			),
 		);
 		text_y += lh;
@@ -1179,7 +1182,7 @@ fn spawn_corpse(
 	let stats = if let Some(mut stats) = stats
 	{
 		stats.dead = true;
-		stats.health = 1.;
+		stats.life = 1.;
 		stats
 	}
 	else
@@ -1209,8 +1212,8 @@ fn spawn_corpse(
 }
 
 fn spawn_fireball(
-	pos: Point3<f32>, velocity_pos: Vector3<f32>, acceleration_pos: Vector3<f32>, time: f64,
-	world: &mut hecs::World,
+	pos: Point3<f32>, velocity_pos: Vector3<f32>, acceleration_pos: Vector3<f32>,
+	damage_stat_values: comps::StatValues, time: f64, world: &mut hecs::World,
 ) -> Result<hecs::Entity>
 {
 	let team = comps::Team::Enemy;
@@ -1232,7 +1235,7 @@ fn spawn_fireball(
 			effects: vec![
 				comps::Effect::Die,
 				comps::Effect::SpawnFireHit,
-				comps::Effect::DoDamage(comps::Damage::Magic(1.), team),
+				comps::Effect::DoDamage(damage_stat_values, team),
 			],
 		},
 		comps::OnDeathEffect {
@@ -1493,6 +1496,8 @@ struct Map
 	camera_lookahead: Vector2<f32>,
 	show_depth: bool,
 	nearby_item: Option<hecs::Entity>,
+	inventory_shown: bool,
+	level: i32,
 }
 
 impl Map
@@ -1512,7 +1517,7 @@ impl Map
 				spawn_item(
 					Point3::new(32. + 16. * i as f32, 16. * j as f32, 0.),
 					Vector3::new(0., 0., 128.),
-					comps::generate_item(comps::ItemKind::Blue, 7, 30, &mut thread_rng()),
+					comps::generate_item(comps::ItemKind::Red, 7, 30, &mut thread_rng()),
 					&mut world,
 				)?;
 			}
@@ -1552,6 +1557,8 @@ impl Map
 			camera_lookahead: Vector2::zeros(),
 			show_depth: false,
 			nearby_item: None,
+			inventory_shown: false,
+			level: 1,
 		})
 	}
 
@@ -1594,8 +1601,16 @@ impl Map
 		}
 		for (id, stats) in self.world.query::<&mut comps::Stats>().iter()
 		{
-			let inventory = self.world.get::<&comps::Inventory>(id).ok();
-			stats.reset(inventory.as_deref());
+			if stats.life > 0.
+			{
+				let inventory = self.world.get::<&comps::Inventory>(id).ok();
+				stats.reset(inventory.as_deref());
+				stats.logic(state);
+			}
+			else
+			{
+				stats.dead = true;
+			}
 		}
 
 		// Input.
@@ -1933,9 +1948,14 @@ impl Map
 				appearance.speed = velocity.pos.z.abs() / 196.;
 			}
 		}
-		for (_, (appearance, position, attack)) in self
+		for (_, (appearance, position, attack, stats)) in self
 			.world
-			.query::<(&mut comps::Appearance, &comps::Position, &comps::Attack)>()
+			.query::<(
+				&mut comps::Appearance,
+				&comps::Position,
+				&comps::Attack,
+				&comps::Stats,
+			)>()
 			.iter()
 		{
 			if attack.want_attack
@@ -1944,7 +1964,7 @@ impl Map
 				appearance
 					.animation_state
 					.set_new_animation(format!("Attack{}", vec_to_dir_name(dir)));
-				appearance.speed = 1.; // TODO: cast speed
+				appearance.speed = stats.values.cast_speed;
 			}
 		}
 		for (_, (appearance, _)) in self
@@ -1989,7 +2009,7 @@ impl Map
 				&mut comps::Appearance,
 				&comps::Position,
 				&mut comps::Attack,
-				&comps::Stats,
+				&mut comps::Stats,
 			)>()
 			.iter()
 		{
@@ -1998,27 +2018,39 @@ impl Map
 				let dir = (attack.target_position - position.pos).normalize();
 				for _ in 0..appearance.animation_state.drain_activations()
 				{
-					match attack.kind
+					let mana_cost = self.level as f32 * 10.;
+					if mana_cost <= stats.mana
 					{
-						comps::AttackKind::Fireball =>
+						stats.mana -= mana_cost;
+						match attack.kind
 						{
-							// TODO: Spawn position?
-							let pos = position.pos.clone();
-							let time = state.time();
-							spawn_fns.push(Box::new(move |map| {
-								spawn_fireball(
-									pos + Vector3::new(0., 0., 16.),
-									dir * 100.,
-									dir * 100.,
-									time,
-									&mut map.world,
-								)
-							}));
+							comps::AttackKind::Fireball =>
+							{
+								// TODO: Spawn position?
+								let pos = position.pos.clone();
+								let time = state.time();
+								let stat_values = stats.values;
+								dbg!(stat_values.physical_damage);
+								spawn_fns.push(Box::new(move |map| {
+									spawn_fireball(
+										pos + Vector3::new(0., 0., 16.),
+										dir * 100.,
+										dir * 100.,
+										stat_values,
+										time,
+										&mut map.world,
+									)
+								}));
+							}
+							comps::AttackKind::BladeBlade =>
+							{
+								blade_blade_activations.push((id, stats.values.skill_duration));
+							}
 						}
-						comps::AttackKind::BladeBlade =>
-						{
-							blade_blade_activations.push((id, stats.values.skill_duration));
-						}
+					}
+					else
+					{
+						appearance.animation_state.drain_loops();
 					}
 				}
 				if appearance.animation_state.drain_loops() > 0
@@ -2393,10 +2425,7 @@ impl Map
 								Some(other_id),
 								vec![
 									comps::Effect::SpawnFireHit,
-									comps::Effect::DoDamage(
-										comps::Damage::Magic(1.),
-										stats.values.team,
-									),
+									comps::Effect::DoDamage(stats.values, stats.values.team),
 								],
 							));
 						}
@@ -2431,10 +2460,10 @@ impl Map
 			}
 		}
 
-		// Die on zero health.
+		// Die on zero life.
 		for (id, stats) in self.world.query::<&comps::Stats>().iter()
 		{
-			if stats.health <= 0.
+			if stats.life <= 0.
 			{
 				to_die.push((true, id));
 			}
@@ -2476,8 +2505,11 @@ impl Map
 								.push(Box::new(move |map| spawn_fire_hit(pos, &mut map.world)));
 						}
 					}
-					(comps::Effect::DoDamage(damage, team), other_id) =>
+					(comps::Effect::DoDamage(damage_stat_values, team), other_id) =>
 					{
+						let mut life_leech = 0.;
+						let mut mana_leech = 0.;
+
 						if let Some(other_id) = other_id
 						{
 							if let Ok(stats) =
@@ -2485,8 +2517,30 @@ impl Map
 							{
 								if team.can_damage(stats.values.team)
 								{
-									stats.apply_damage(damage);
+									let (new_life_leech, new_mana_leech) =
+										stats.apply_damage(&damage_stat_values, &mut rng);
+									life_leech = new_life_leech;
+									mana_leech = new_mana_leech;
 								}
+							}
+						}
+						if let Ok(stats) = self.world.query_one_mut::<&mut comps::Stats>(id)
+						{
+							if life_leech > 0.
+							{
+								let duration = 4. * stats.values.skill_duration;
+								stats.life_leech_instances.push(comps::LeechInstance {
+									rate: life_leech / duration * DT,
+									time_to_remove: state.time() + duration as f64,
+								});
+							}
+							if mana_leech > 0.
+							{
+								let duration = 4. * stats.values.skill_duration;
+								stats.mana_leech_instances.push(comps::LeechInstance {
+									rate: mana_leech / duration * DT,
+									time_to_remove: state.time() + duration as f64,
+								});
 							}
 						}
 					}
@@ -2622,12 +2676,13 @@ impl Map
 									0.,
 								);
 							let crystal_level = crystal.level;
+							let level = self.level;
 							spawn_fns.push(Box::new(move |map| {
 								let mut rng = thread_rng();
 								spawn_item(
 									pos,
 									Vector3::new(0., 0., 128.),
-									comps::generate_item(kind, crystal_level, 0, &mut rng),
+									comps::generate_item(kind, crystal_level, level, &mut rng),
 									&mut map.world,
 								)
 							}));
@@ -2719,9 +2774,8 @@ impl Map
 			)?;
 
 			let draw_pos = position.draw_pos(state.alpha);
-			let pos = utils::round_point(
-				utils::round_point(Point2::new(draw_pos.x, draw_pos.y - draw_pos.z)) + camera_shift,
-			);
+			let pos =
+				utils::round_point(Point2::new(draw_pos.x, draw_pos.y - draw_pos.z) + camera_shift);
 
 			let (atlas_bmp, offt) = sprite.get_frame_from_state(&appearance.animation_state);
 
@@ -2780,9 +2834,7 @@ impl Map
 				.get_palette_index(&sprite.get_palettes()[0])?;
 
 			let draw_pos = position.draw_pos(state.alpha);
-			let pos = utils::round_point(
-				utils::round_point(Point2::new(draw_pos.x, draw_pos.y)) + camera_shift,
-			);
+			let pos = utils::round_point(Point2::new(draw_pos.x, draw_pos.y) + camera_shift);
 			let (atlas_bmp, offt) = sprite.get_frame("Default", 0);
 
 			scene.add_bitmap(
@@ -2898,27 +2950,186 @@ impl Map
 			PrimType::TriangleList,
 		);
 
-		//for (_, position) in &appearances
-		//{
-		//	let draw_pos = position.draw_pos(state.alpha);
-		//	let pos =
-		//		utils::round_point(Point2::new(draw_pos.x, draw_pos.y - draw_pos.z) + camera_shift);
+		state
+			.core
+			.use_shader(Some(&*state.basic_shader.upgrade().unwrap()))
+			.unwrap();
+		state.core.set_depth_test(None);
 
-		//	for i in 0..10
-		//	{
-		//	state.prim.draw_elliptical_arc(
-		//		pos.x,
-		//		pos.y - 16.,
-		//		16. + i as f32 * 2.,
-		//		8.  + i as f32 * 1.,
-		//		(117. * i as f64 + 8. * state.time() % (2. * std::f64::consts::PI)) as f32,
-		//		std::f32::consts::PI / 4.,
-		//		Color::from_rgb_f(1., 0., 0.),
-		//		-1.,
-		//	);
-		//	}
-		//}
+		let mut life_bar_bkg_vertices = vec![];
+		let mut life_bar_fgd_vertices = vec![];
+		let mut life_bar_indices = vec![];
+
+		for (_, (position, stats)) in self.world.query_mut::<(&comps::Position, &comps::Stats)>()
+		{
+			if stats.values.team != comps::Team::Enemy
+			{
+				continue;
+			}
+			if stats.life == stats.values.max_life
+			{
+				continue;
+			}
+			let draw_pos = position.draw_pos(state.alpha);
+			let pos = utils::round_point(
+				Point2::new(draw_pos.x, draw_pos.y - draw_pos.z - 32.5) + camera_shift,
+			);
+			let w1 = 16.;
+			let w2 = 15.;
+			let h1 = 1.5;
+			let h2 = 0.5;
+
+			let idx = life_bar_bkg_vertices.len() as i32;
+			life_bar_indices.extend([idx + 0, idx + 1, idx + 2, idx + 0, idx + 2, idx + 3]);
+
+			let bkg_locs = [
+				Point2::new(pos.x - w1, pos.y - h1),
+				Point2::new(pos.x + w1, pos.y - h1),
+				Point2::new(pos.x + w1, pos.y + h1),
+				Point2::new(pos.x - w1, pos.y + h1),
+			];
+			for loc in bkg_locs
+			{
+				life_bar_bkg_vertices.push(Vertex {
+					x: loc.x,
+					y: loc.y,
+					z: 0.,
+					u: 0.,
+					v: 0.,
+					color: Color::from_rgb_f(0., 0., 0.),
+				});
+			}
+
+			let f = stats.life / stats.values.max_life;
+			let fgd_locs = [
+				Point2::new(pos.x - w2, pos.y - h2),
+				Point2::new(pos.x - w2 + 2. * w2 * f, pos.y - h2),
+				Point2::new(pos.x - w2 + 2. * w2 * f, pos.y + h2),
+				Point2::new(pos.x - w2, pos.y + h2),
+			];
+			for loc in fgd_locs
+			{
+				life_bar_fgd_vertices.push(Vertex {
+					x: loc.x,
+					y: loc.y,
+					z: 0.,
+					u: 0.,
+					v: 0.,
+					color: Color::from_rgb_f(1., 0.1, 0.1),
+				});
+			}
+		}
+		state.prim.draw_indexed_prim(
+			&life_bar_bkg_vertices[..],
+			Option::<&Bitmap>::None,
+			&life_bar_indices[..],
+			0,
+			life_bar_indices.len() as u32,
+			PrimType::TriangleList,
+		);
+		state.prim.draw_indexed_prim(
+			&life_bar_fgd_vertices[..],
+			Option::<&Bitmap>::None,
+			&life_bar_indices[..],
+			0,
+			life_bar_indices.len() as u32,
+			PrimType::TriangleList,
+		);
+
+		if let Ok(stats) = self.world.query_one_mut::<&comps::Stats>(self.player)
+		{
+			let orb_radius = 32.;
+			let pad = 4.;
+			let lh = state.ui_font().get_line_height() as f32;
+
+			let (orb_left, orb_right, orb_y, orb_top) = if self.inventory_shown
+			{
+				(
+					state.buffer_width() / 2. - orb_radius - pad,
+					state.buffer_width() / 2. + orb_radius + pad,
+					16. + pad + orb_radius,
+					16. + pad - lh,
+				)
+			}
+			else
+			{
+				(
+					pad + orb_radius,
+					state.buffer_width() as f32 - pad - orb_radius,
+					state.buffer_height() as f32 - pad - orb_radius,
+					state.buffer_height() as f32 - 2. * orb_radius - pad - lh,
+				)
+			};
+
+			let life = if stats.dead { 0. } else { stats.life };
+
+			state.core.draw_text(
+				state.ui_font(),
+				Color::from_rgb_f(1., 1., 1.),
+				orb_left,
+				orb_top,
+				FontAlign::Centre,
+				&format!("{}/{}", life as i32, stats.values.max_life as i32,),
+			);
+
+			draw_orb(
+				state,
+				orb_radius,
+				orb_left,
+				orb_y,
+				life / stats.values.max_life,
+				Color::from_rgb_f(0.9, 0.2, 0.2),
+			);
+
+			state.core.draw_text(
+				state.ui_font(),
+				Color::from_rgb_f(1., 1., 1.),
+				orb_right,
+				orb_top,
+				FontAlign::Centre,
+				&format!("{}/{}", stats.mana as i32, stats.values.max_mana as i32,),
+			);
+
+			draw_orb(
+				state,
+				orb_radius,
+				orb_right,
+				orb_y,
+				stats.mana / stats.values.max_mana,
+				Color::from_rgb_f(0.2, 0.2, 0.9),
+			);
+		}
 
 		Ok(())
 	}
+}
+
+fn draw_orb(state: &game_state::GameState, r: f32, dx: f32, dy: f32, f: f32, color: Color)
+{
+	let dtheta = 2. * PI / 32.;
+
+	let mut vertices = vec![];
+	let theta_start = (2. * f - 1.).acos();
+	let num_vertices = ((2. * PI - 2. * theta_start) / dtheta) as i32;
+	let dtheta = (2. * PI - 2. * theta_start) / num_vertices as f32;
+	for i in 0..=num_vertices
+	{
+		let theta = theta_start + dtheta * i as f32;
+		vertices.push(Vertex {
+			x: dx - r * theta.sin(),
+			y: dy - r * theta.cos(),
+			z: 0.,
+			u: 0.,
+			v: 0.,
+			color: color,
+		})
+	}
+
+	state.prim.draw_prim(
+		&vertices[..],
+		Option::<&Bitmap>::None,
+		0,
+		vertices.len() as u32,
+		PrimType::TriangleFan,
+	);
 }

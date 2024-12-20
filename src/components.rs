@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::{sprite, utils};
+use crate::{game_state, sprite, utils};
 use allegro::*;
 use na::{Point3, Vector2, Vector3};
 use nalgebra as na;
@@ -213,8 +213,8 @@ pub struct StatValues
 	pub jump_strength: f32,
 	pub team: Team,
 
-	pub max_health: f32,
-	pub health_regen: f32,
+	pub max_life: f32,
+	pub life_regen: f32,
 	pub max_mana: f32,
 	pub mana_regen: f32,
 
@@ -236,7 +236,7 @@ pub struct StatValues
 	pub fire_resistance: f32,
 	pub lightning_resistance: f32,
 
-	pub health_leech: f32,
+	pub life_leech: f32,
 	pub mana_leech: f32,
 	pub chance_to_ignite: f32,
 	pub chance_to_freeze: f32,
@@ -253,8 +253,8 @@ impl Default for StatValues
 			jump_strength: 0.,
 			team: Team::Enemy,
 
-			max_health: 0.,
-			health_regen: 0.,
+			max_life: 0.,
+			life_regen: 0.,
 			max_mana: 0.,
 			mana_regen: 0.,
 
@@ -276,7 +276,7 @@ impl Default for StatValues
 			fire_resistance: 0.,
 			lightning_resistance: 0.,
 
-			health_leech: 0.,
+			life_leech: 0.,
 			mana_leech: 0.,
 			chance_to_ignite: 0.,
 			chance_to_freeze: 0.,
@@ -295,10 +295,10 @@ impl StatValues
 			jump_strength: 128.,
 			team: Team::Player,
 
-			max_health: 100.,
-			health_regen: 0.05,
+			max_life: 100.,
+			life_regen: 1.,
 			max_mana: 100.,
-			mana_regen: 0.05,
+			mana_regen: 5.,
 
 			area_of_effect: 1.,
 			cast_speed: 1.,
@@ -318,7 +318,13 @@ impl StatValues
 			speed: 64.,
 			acceleration: 1024.,
 			skill_duration: 0.25,
-			max_health: 1.,
+			max_life: 50.,
+			mana_regen: 100.,
+			max_mana: 100.,
+			cast_speed: 1.,
+			physical_damage: 4.,
+			critical_chance: 0.05,
+			critical_multiplier: 1.5,
 			..Self::default()
 		}
 	}
@@ -328,7 +334,7 @@ impl StatValues
 		Self {
 			speed: 256.,
 			acceleration: 1024.,
-			max_health: 1.,
+			max_life: 1.,
 			..Self::default()
 		}
 	}
@@ -339,7 +345,7 @@ impl StatValues
 			speed: 256.,
 			team: Team::Neutral,
 			jump_strength: 128.,
-			max_health: 1.,
+			max_life: 1.,
 			..Self::default()
 		}
 	}
@@ -349,10 +355,17 @@ impl StatValues
 		Self {
 			speed: 256.,
 			team: Team::Neutral,
-			max_health: 1.,
+			max_life: 1.,
 			..Self::default()
 		}
 	}
+}
+
+#[derive(Debug, Clone)]
+pub struct LeechInstance
+{
+	pub rate: f32,
+	pub time_to_remove: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -362,9 +375,14 @@ pub struct Stats
 	pub values: StatValues,
 
 	pub attacking: bool,
-	pub health: f32,
-	pub old_max_health: f32,
+	pub life: f32,
+	pub mana: f32,
+	pub old_max_life: f32,
+	pub old_max_mana: f32,
 	pub dead: bool,
+
+	pub life_leech_instances: Vec<LeechInstance>,
+	pub mana_leech_instances: Vec<LeechInstance>,
 }
 
 impl Stats
@@ -375,9 +393,13 @@ impl Stats
 			base_values: base_values,
 			values: base_values,
 			attacking: false,
-			health: base_values.max_health,
-			old_max_health: base_values.max_health,
+			life: base_values.max_life,
+			mana: base_values.max_mana,
+			old_max_life: base_values.max_life,
+			old_max_mana: base_values.max_mana,
 			dead: false,
+			life_leech_instances: vec![],
+			mana_leech_instances: vec![],
 		}
 	}
 
@@ -408,10 +430,10 @@ impl Stats
 			self.values.jump_strength = (self.base_values.jump_strength + adds.jump_strength)
 				* (1. + increases.jump_strength);
 
-			self.values.max_health =
-				(self.base_values.max_health + adds.max_health) * (1. + increases.max_health);
-			self.values.health_regen =
-				(self.base_values.health_regen + adds.health_regen) * (1. + increases.health_regen);
+			self.values.max_life =
+				(self.base_values.max_life + adds.max_life) * (1. + increases.max_life);
+			self.values.life_regen =
+				(self.base_values.life_regen + adds.life_regen) * (1. + increases.life_regen);
 			self.values.max_mana =
 				(self.base_values.max_mana + adds.max_mana) * (1. + increases.max_mana);
 			self.values.mana_regen =
@@ -452,8 +474,8 @@ impl Stats
 				+ adds.lightning_resistance)
 				* (1. + increases.lightning_resistance);
 
-			self.values.health_leech =
-				(self.base_values.health_leech + adds.health_leech) * (1. + increases.health_leech);
+			self.values.life_leech =
+				(self.base_values.life_leech + adds.life_leech) * (1. + increases.life_leech);
 			self.values.mana_leech =
 				(self.base_values.mana_leech + adds.mana_leech) * (1. + increases.mana_leech);
 			self.values.chance_to_ignite = (self.base_values.chance_to_ignite
@@ -476,8 +498,13 @@ impl Stats
 			self.values.chance_to_ignite = utils::min(1., self.values.chance_to_ignite);
 			self.values.chance_to_freeze = utils::min(1., self.values.chance_to_freeze);
 
-			self.health *= self.values.max_health / self.old_max_health;
-			self.old_max_health = self.values.max_health;
+			self.life *= self.values.max_life / self.old_max_life;
+			self.life = utils::min(self.values.max_life, self.life);
+			self.old_max_life = self.values.max_life;
+
+			self.mana *= self.values.max_mana / self.old_max_mana;
+			self.mana = utils::min(self.values.max_mana, self.mana);
+			self.old_max_mana = self.values.max_mana;
 		}
 
 		if self.attacking
@@ -491,15 +518,67 @@ impl Stats
 		}
 	}
 
-	pub fn apply_damage(&mut self, damage: Damage)
+	pub fn apply_damage(&mut self, values: &StatValues, rng: &mut impl Rng) -> (f32, f32)
 	{
-		match damage
+		let (crit, damage_mult) = if rng.gen_bool(values.critical_chance as f64)
 		{
-			Damage::Magic(damage) =>
-			{
-				self.health -= damage;
-			}
+			(true, values.critical_multiplier)
 		}
+		else
+		{
+			(false, 1.)
+		};
+
+		let scaled_armor = self.values.armor * 10.;
+		let physical_damage = values.physical_damage * values.physical_damage
+			/ (values.physical_damage + scaled_armor);
+		let damage = physical_damage * (1. - self.values.physical_resistance)
+			+ values.cold_damage * (1. - self.values.cold_resistance)
+			+ values.fire_damage * (1. - self.values.fire_resistance)
+			+ values.lightning_damage * (1. - self.values.lightning_resistance);
+		let final_damage = damage_mult * damage;
+		let life_leech = final_damage * values.life_leech;
+		let mana_leech = final_damage * values.mana_leech;
+		self.life = utils::max(0., self.life - final_damage);
+		(life_leech, mana_leech)
+	}
+
+	pub fn logic(&mut self, state: &mut game_state::GameState)
+	{
+		self.life_leech_instances
+			.retain_mut(|li| li.time_to_remove > state.time());
+		self.mana_leech_instances
+			.retain_mut(|li| li.time_to_remove > state.time());
+
+		let life_leech = self
+			.life_leech_instances
+			.iter()
+			.map(|li| li.rate)
+			.reduce(utils::max)
+			.unwrap_or(0.);
+		let mana_leech = self
+			.mana_leech_instances
+			.iter()
+			.map(|li| li.rate)
+			.reduce(utils::max)
+			.unwrap_or(0.);
+
+		self.life += life_leech;
+		self.mana += mana_leech;
+
+		if self.life >= self.values.max_life
+		{
+			self.life_leech_instances.clear();
+		}
+		if self.mana >= self.values.max_mana
+		{
+			self.mana_leech_instances.clear();
+		}
+		let dt = utils::DT;
+		self.life += self.values.life_regen * dt;
+		self.mana += self.values.mana_regen * dt;
+		self.life = utils::min(self.values.max_life, self.life);
+		self.mana = utils::min(self.values.max_mana, self.mana);
 	}
 }
 
@@ -563,17 +642,11 @@ impl PlaceToDie
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum Damage
-{
-	Magic(f32),
-}
-
-#[derive(Debug, Copy, Clone)]
 pub enum Effect
 {
 	Die,
 	SpawnFireHit,
-	DoDamage(Damage, Team),
+	DoDamage(StatValues, Team),
 	SpawnCorpse,
 	SpawnSoul(hecs::Entity),
 	UnlockCrystal(hecs::Entity),
@@ -718,8 +791,8 @@ impl Crystal
 #[repr(i32)]
 pub enum ItemPrefix
 {
-	Health = 0,
-	HealthRegen = 1,
+	Life = 0,
+	LifeRegen = 1,
 	AddedPhysicalDamage = 2,
 	AddedColdDamage = 3,
 	AddedFireDamage = 4,
@@ -740,8 +813,8 @@ impl ItemPrefix
 	{
 		match self
 		{
-			ItemPrefix::Health => "Jolly",
-			ItemPrefix::HealthRegen => "Hale",
+			ItemPrefix::Life => "Jolly",
+			ItemPrefix::LifeRegen => "Hale",
 			ItemPrefix::AddedPhysicalDamage => "Bladed",
 			ItemPrefix::AddedColdDamage => "Icy",
 			ItemPrefix::AddedFireDamage => "Blazing",
@@ -762,8 +835,8 @@ impl ItemPrefix
 		let tier = tier as f32;
 		let (delta, mult) = match self
 		{
-			ItemPrefix::Health => (20., 1.),
-			ItemPrefix::HealthRegen => (0.01, 0.01),
+			ItemPrefix::Life => (20., 1.),
+			ItemPrefix::LifeRegen => (1., 1.),
 			ItemPrefix::AddedPhysicalDamage => (5., 1.),
 			ItemPrefix::AddedColdDamage => (10., 1.),
 			ItemPrefix::AddedFireDamage => (10., 1.),
@@ -773,7 +846,7 @@ impl ItemPrefix
 			ItemPrefix::ChanceToIgnite => (0.01, 0.01),
 			ItemPrefix::ChanceToShock => (0.01, 0.01),
 			ItemPrefix::Mana => (20., 1.),
-			ItemPrefix::ManaRegen => (0.05, 0.01),
+			ItemPrefix::ManaRegen => (2., 1.),
 			ItemPrefix::AreaOfEffect => (0.01, 0.01),
 			ItemPrefix::CastSpeed => (0.05, 0.01),
 		};
@@ -788,12 +861,14 @@ impl ItemPrefix
 		let value = self.get_value(tier, frac);
 		let add_percent = match self
 		{
-			ItemPrefix::Health
+			ItemPrefix::Life
+			| ItemPrefix::LifeRegen
 			| ItemPrefix::AddedPhysicalDamage
 			| ItemPrefix::AddedColdDamage
 			| ItemPrefix::AddedFireDamage
 			| ItemPrefix::AddedLightningDamage
 			| ItemPrefix::Mana => false,
+			ItemPrefix::ManaRegen => false,
 			_ => true,
 		};
 		let percent = if add_percent { "%" } else { "" };
@@ -801,8 +876,8 @@ impl ItemPrefix
 		let sign = if value > 0. { "+" } else { "-" };
 		let suffix = match self
 		{
-			ItemPrefix::Health => "Max Health",
-			ItemPrefix::HealthRegen => "Health Regen",
+			ItemPrefix::Life => "Max Life",
+			ItemPrefix::LifeRegen => "Life Regen",
 			ItemPrefix::AddedPhysicalDamage => "Physical Damage",
 			ItemPrefix::AddedColdDamage => "Cold Damage",
 			ItemPrefix::AddedFireDamage => "Fire Damage",
@@ -826,13 +901,13 @@ impl ItemPrefix
 		let value = self.get_value(tier, frac);
 		match self
 		{
-			ItemPrefix::Health =>
+			ItemPrefix::Life =>
 			{
-				adds.max_health += value;
+				adds.max_life += value;
 			}
-			ItemPrefix::HealthRegen =>
+			ItemPrefix::LifeRegen =>
 			{
-				increases.health_regen += value;
+				adds.life_regen += value;
 			}
 			ItemPrefix::AddedPhysicalDamage =>
 			{
@@ -872,7 +947,7 @@ impl ItemPrefix
 			}
 			ItemPrefix::ManaRegen =>
 			{
-				increases.mana_regen += value;
+				adds.mana_regen += value;
 			}
 			ItemPrefix::AreaOfEffect =>
 			{
@@ -900,7 +975,7 @@ pub enum ItemSuffix
 	IncreasedColdDamage = 7,
 	IncreasedFireDamage = 8,
 	IncreasedLightningDamage = 9,
-	HealthLeech = 10,
+	LifeLeech = 10,
 	ManaLeech = 11,
 }
 
@@ -920,7 +995,7 @@ impl ItemSuffix
 			ItemSuffix::IncreasedColdDamage => "of the Iceberg",
 			ItemSuffix::IncreasedFireDamage => "of the Hearth",
 			ItemSuffix::IncreasedLightningDamage => "of the Turbine",
-			ItemSuffix::HealthLeech => "of the Vampire",
+			ItemSuffix::LifeLeech => "of the Vampire",
 			ItemSuffix::ManaLeech => "of the Wight",
 		}
 	}
@@ -930,7 +1005,7 @@ impl ItemSuffix
 		let tier = tier as f32;
 		let (delta, mult) = match self
 		{
-			ItemSuffix::Armour => (20., 1.),
+			ItemSuffix::Armour => (100., 1.),
 			ItemSuffix::PhysicalResistance => (0.01, 0.01),
 			ItemSuffix::ColdResistance => (0.05, 0.01),
 			ItemSuffix::FireResistance => (0.05, 0.01),
@@ -940,8 +1015,8 @@ impl ItemSuffix
 			ItemSuffix::IncreasedColdDamage => (0.10, 0.01),
 			ItemSuffix::IncreasedFireDamage => (0.10, 0.01),
 			ItemSuffix::IncreasedLightningDamage => (0.10, 0.01),
-			ItemSuffix::HealthLeech => (0.001, 0.001),
-			ItemSuffix::ManaLeech => (0.001, 0.001),
+			ItemSuffix::LifeLeech => (0.01, 0.01),
+			ItemSuffix::ManaLeech => (0.01, 0.01),
 		};
 		let start = delta * tier;
 		let end = delta * (tier + 1.);
@@ -972,7 +1047,7 @@ impl ItemSuffix
 			ItemSuffix::IncreasedColdDamage => "Cold Damage",
 			ItemSuffix::IncreasedFireDamage => "Fire Damage",
 			ItemSuffix::IncreasedLightningDamage => "Lightning Damage",
-			ItemSuffix::HealthLeech => "Life Leech",
+			ItemSuffix::LifeLeech => "Life Leech",
 			ItemSuffix::ManaLeech => "Mana Leech",
 		};
 		format!(
@@ -1026,9 +1101,9 @@ impl ItemSuffix
 			{
 				increases.lightning_damage += value;
 			}
-			ItemSuffix::HealthLeech =>
+			ItemSuffix::LifeLeech =>
 			{
-				adds.health_leech += value;
+				adds.life_leech += value;
 			}
 			ItemSuffix::ManaLeech =>
 			{
@@ -1095,8 +1170,8 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 	.0;
 
 	let red_prefix_weights = [
-		(ItemPrefix::Health, 1000),
-		(ItemPrefix::HealthRegen, 500),
+		(ItemPrefix::Life, 1000),
+		(ItemPrefix::LifeRegen, 1000),
 		(ItemPrefix::AddedPhysicalDamage, 500),
 		(ItemPrefix::AddedColdDamage, 50),
 		(ItemPrefix::AddedFireDamage, 1000),
@@ -1112,8 +1187,8 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 	];
 
 	let green_prefix_weights = [
-		(ItemPrefix::Health, 50),
-		(ItemPrefix::HealthRegen, 50),
+		(ItemPrefix::Life, 50),
+		(ItemPrefix::LifeRegen, 50),
 		(ItemPrefix::AddedPhysicalDamage, 500),
 		(ItemPrefix::AddedColdDamage, 50),
 		(ItemPrefix::AddedFireDamage, 50),
@@ -1129,8 +1204,8 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 	];
 
 	let blue_prefix_weights = [
-		(ItemPrefix::Health, 50),
-		(ItemPrefix::HealthRegen, 50),
+		(ItemPrefix::Life, 50),
+		(ItemPrefix::LifeRegen, 50),
 		(ItemPrefix::AddedPhysicalDamage, 500),
 		(ItemPrefix::AddedColdDamage, 1000),
 		(ItemPrefix::AddedFireDamage, 50),
@@ -1140,7 +1215,7 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 		(ItemPrefix::ChanceToIgnite, 10),
 		(ItemPrefix::ChanceToShock, 10),
 		(ItemPrefix::Mana, 1000),
-		(ItemPrefix::ManaRegen, 500),
+		(ItemPrefix::ManaRegen, 1000),
 		(ItemPrefix::AreaOfEffect, 50),
 		(ItemPrefix::CastSpeed, 50),
 	];
@@ -1156,7 +1231,7 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 		(ItemSuffix::IncreasedColdDamage, 500),
 		(ItemSuffix::IncreasedFireDamage, 1000),
 		(ItemSuffix::IncreasedLightningDamage, 500),
-		(ItemSuffix::HealthLeech, 200),
+		(ItemSuffix::LifeLeech, 200),
 		(ItemSuffix::ManaLeech, 50),
 	];
 
@@ -1171,7 +1246,7 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 		(ItemSuffix::IncreasedColdDamage, 500),
 		(ItemSuffix::IncreasedFireDamage, 500),
 		(ItemSuffix::IncreasedLightningDamage, 1000),
-		(ItemSuffix::HealthLeech, 50),
+		(ItemSuffix::LifeLeech, 50),
 		(ItemSuffix::ManaLeech, 50),
 	];
 
@@ -1186,7 +1261,7 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 		(ItemSuffix::IncreasedColdDamage, 1000),
 		(ItemSuffix::IncreasedFireDamage, 500),
 		(ItemSuffix::IncreasedLightningDamage, 500),
-		(ItemSuffix::HealthLeech, 50),
+		(ItemSuffix::LifeLeech, 50),
 		(ItemSuffix::ManaLeech, 200),
 	];
 
