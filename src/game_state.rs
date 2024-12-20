@@ -245,16 +245,23 @@ impl GameState
 			self.buffer2 = Some(Bitmap::new(&self.core, buffer_width, buffer_height).unwrap());
 		}
 
-		self.ui_font = Some(
-			Font::new_builtin(&self.font)
-				.map_err(|_| "Couldn't create builtin font".to_string())?,
-		);
+		//self.ui_font = Some(
+		//	Font::new_builtin(&self.font)
+		//		.map_err(|_| "Couldn't create builtin font".to_string())?,
+		//);
 
-		/*	Some(utils::load_ttf_font(
+		//self.ui_font = Some(utils::load_ttf_font(
+		//	&self.ttf,
+		//	"data/jupiterc.ttf",
+		//	(20. * self.options.ui_scale) as i32,
+		//)?);
+
+		self.ui_font = Some(utils::load_ttf_font(
 			&self.ttf,
-			"data/MHTIROGLA.ttf",
-			(-8. * self.options.ui_scale) as i32,
-		)?);*/
+			"data/Pixel Musketeer.ttf",
+			(14. * self.options.ui_scale) as i32,
+		)?);
+
 		Ok(())
 	}
 

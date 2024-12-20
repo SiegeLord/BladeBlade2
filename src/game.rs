@@ -32,6 +32,8 @@ impl Game
 {
 	pub fn new(state: &mut game_state::GameState) -> Result<Self>
 	{
+		//dbg!(100. * comps::ItemPrefix::ManaRegen.get_value(24, 0.15291262));
+		//return Err("Foo".to_string().into());
 		state.cache_sprite("data/player.cfg")?;
 		state.cache_sprite("data/fireball.cfg")?;
 		state.cache_sprite("data/fire_hit.cfg")?;
@@ -67,7 +69,7 @@ impl Game
 			{
 				if self.inventory_screen.is_none()
 				{
-					self.inventory_screen = Some(InventoryScreen::new());
+					self.inventory_screen = Some(InventoryScreen::new(&self.map));
 					state.paused = true;
 				}
 				else
@@ -200,20 +202,48 @@ struct InventoryScreen
 	selection: i32,
 }
 
-const CELL_OFFTS: [Vector2<f32>; 6] = [
+const CELL_OFFTS: [Vector2<f32>; 9] = [
 	Vector2::new(0., -58.),
 	Vector2::new(48., -27.),
 	Vector2::new(48., 27.),
 	Vector2::new(0., 58.),
 	Vector2::new(-48., 27.),
 	Vector2::new(-48., -27.),
+	Vector2::new(-48., 128.),
+	Vector2::new(0., 128.),
+	Vector2::new(48., 128.),
 ];
 
 impl InventoryScreen
 {
-	pub fn new() -> Self
+	pub fn new(map: &Map) -> Self
 	{
-		Self { selection: 0 }
+		let inventory = map.world.get::<&mut comps::Inventory>(map.player).unwrap();
+		let mut selection = 0;
+
+		for (i, slot) in inventory.slots.iter().enumerate()
+		{
+			if map.nearby_item.is_none()
+			{
+				if slot.is_some()
+				{
+					selection = i as i32;
+					break;
+				}
+			}
+			else
+			{
+				if slot.is_none()
+				{
+					selection = i as i32;
+					break;
+				}
+			}
+		}
+
+		Self {
+			selection: selection,
+		}
 	}
 
 	pub fn input(
@@ -283,6 +313,13 @@ impl InventoryScreen
 				)?;
 				map.nearby_item = Some(id);
 			}
+
+			if let Ok((inventory, stats)) = map
+				.world
+				.query_one_mut::<(&comps::Inventory, &mut comps::Stats)>(map.player)
+			{
+				stats.reset(Some(inventory))
+			}
 		}
 
 		Ok(sel_dir.norm() > 0. || do_swap)
@@ -331,13 +368,18 @@ impl InventoryScreen
 			sprite.draw_frame(center + cell_offt, "Default", frame, state);
 		}
 
-		let panel_width = 150.;
+		let panel_width = 160.;
 		let panel_height = 160.;
-		let pad = 10.;
+		let pad = 4.;
+		let phys = Color::from_rgb_f(0.9, 0.9, 0.9);
+		let fire = Color::from_rgb_f(0.9, 0.1, 0.1);
+		let lightning = Color::from_rgb_f(0.9, 0.9, 0.1);
+		let cold = Color::from_rgb_f(0.1, 0.1, 0.9);
+		let magic = Color::from_rgb_f(0.3, 0.3, 0.9);
+		let rare = Color::from_rgb_f(0.9, 0.9, 0.3);
 
 		let stats_left = pad;
 		let stats_right = stats_left + panel_width;
-		let stats_center = stats_left + panel_width / 2.;
 		let stats_top = state.buffer_height() as f32 / 2. - pad / 2. - panel_height;
 		let stats_bottom = stats_top + panel_height;
 
@@ -353,7 +395,7 @@ impl InventoryScreen
 		let ground_item_top = state.buffer_height() as f32 / 2. - panel_height / 2.;
 		let ground_item_bottom = ground_item_top + panel_height;
 
-		let lh = state.ui_font().get_line_height() as f32 + 2.;
+		let lh = state.ui_font().get_line_height() as f32;
 
 		let mut scene = Scene::new();
 
@@ -374,14 +416,246 @@ impl InventoryScreen
 			stats_left + pad / 2.,
 			text_y,
 			FontAlign::Left,
-			&format!("Max Health: {}", stats.values.max_health),
+			&format!(
+				"Health: {} + {}/s",
+				stats.values.max_health as i32,
+				utils::nice_float(stats.values.max_health * stats.values.health_regen, 0)
+			),
 		);
 		text_y += lh;
+
+		state.core.draw_text(
+			state.ui_font(),
+			Color::from_rgb_f(1., 1., 1.),
+			stats_left + pad / 2.,
+			text_y,
+			FontAlign::Left,
+			&format!(
+				"Mana: {} + {}/s",
+				stats.values.max_mana as i32,
+				utils::nice_float(stats.values.max_mana * stats.values.mana_regen, 0)
+			),
+		);
+		text_y += lh;
+
+		state.core.draw_text(
+			state.ui_font(),
+			Color::from_rgb_f(1., 1., 1.),
+			stats_left + pad / 2.,
+			text_y,
+			FontAlign::Left,
+			&format!("Armor: {}", utils::nice_float(stats.values.armor, 2),),
+		);
+		text_y += lh;
+
+		let mut text_x = stats_left + pad / 2.;
+		text_x += utils::draw_text(
+			&state.core,
+			state.ui_font(),
+			Color::from_rgb_f(1., 1., 1.),
+			text_x,
+			text_y,
+			FontAlign::Left,
+			&format!("Resist: "),
+		);
+		text_x += utils::draw_text(
+			&state.core,
+			state.ui_font(),
+			phys,
+			text_x,
+			text_y,
+			FontAlign::Left,
+			&format!("{}%", (100. * stats.values.physical_resistance) as i32),
+		);
+		text_x += utils::draw_text(
+			&state.core,
+			state.ui_font(),
+			Color::from_rgb_f(1., 1., 1.),
+			text_x,
+			text_y,
+			FontAlign::Left,
+			"/",
+		);
+		text_x += utils::draw_text(
+			&state.core,
+			state.ui_font(),
+			cold,
+			text_x,
+			text_y,
+			FontAlign::Left,
+			&format!("{}%", (100. * stats.values.cold_resistance) as i32),
+		);
+		text_x += utils::draw_text(
+			&state.core,
+			state.ui_font(),
+			Color::from_rgb_f(1., 1., 1.),
+			text_x,
+			text_y,
+			FontAlign::Left,
+			"/",
+		);
+		text_x += utils::draw_text(
+			&state.core,
+			state.ui_font(),
+			fire,
+			text_x,
+			text_y,
+			FontAlign::Left,
+			&format!("{}%", (100. * stats.values.fire_resistance) as i32),
+		);
+		text_x += utils::draw_text(
+			&state.core,
+			state.ui_font(),
+			Color::from_rgb_f(1., 1., 1.),
+			text_x,
+			text_y,
+			FontAlign::Left,
+			"/",
+		);
+		utils::draw_text(
+			&state.core,
+			state.ui_font(),
+			lightning,
+			text_x,
+			text_y,
+			FontAlign::Left,
+			&format!("{}%", (100. * stats.values.lightning_resistance) as i32),
+		);
+		text_y += lh;
+
+		let mut text_x = stats_left + pad / 2.;
+		text_x += utils::draw_text(
+			&state.core,
+			state.ui_font(),
+			Color::from_rgb_f(1., 1., 1.),
+			text_x,
+			text_y,
+			FontAlign::Left,
+			&format!("Damage: "),
+		);
+		text_x += utils::draw_text(
+			&state.core,
+			state.ui_font(),
+			phys,
+			text_x,
+			text_y,
+			FontAlign::Left,
+			&format!("{}", stats.values.physical_damage as i32),
+		);
+		text_x += utils::draw_text(
+			&state.core,
+			state.ui_font(),
+			Color::from_rgb_f(1., 1., 1.),
+			text_x,
+			text_y,
+			FontAlign::Left,
+			"/",
+		);
+		text_x += utils::draw_text(
+			&state.core,
+			state.ui_font(),
+			cold,
+			text_x,
+			text_y,
+			FontAlign::Left,
+			&format!("{}", stats.values.cold_damage as i32),
+		);
+		text_x += utils::draw_text(
+			&state.core,
+			state.ui_font(),
+			Color::from_rgb_f(1., 1., 1.),
+			text_x,
+			text_y,
+			FontAlign::Left,
+			"/",
+		);
+		text_x += utils::draw_text(
+			&state.core,
+			state.ui_font(),
+			fire,
+			text_x,
+			text_y,
+			FontAlign::Left,
+			&format!("{}", stats.values.fire_damage as i32),
+		);
+		text_x += utils::draw_text(
+			&state.core,
+			state.ui_font(),
+			Color::from_rgb_f(1., 1., 1.),
+			text_x,
+			text_y,
+			FontAlign::Left,
+			"/",
+		);
+		utils::draw_text(
+			&state.core,
+			state.ui_font(),
+			lightning,
+			text_x,
+			text_y,
+			FontAlign::Left,
+			&format!("{}", stats.values.lightning_damage as i32),
+		);
+		text_y += lh;
+
+		state.core.draw_text(
+			state.ui_font(),
+			Color::from_rgb_f(1., 1., 1.),
+			stats_left + pad / 2.,
+			text_y,
+			FontAlign::Left,
+			&format!(
+				"Area of Effect: {}%",
+				utils::nice_float(100. * stats.values.area_of_effect, 2)
+			),
+		);
+		text_y += lh;
+
+		state.core.draw_text(
+			state.ui_font(),
+			Color::from_rgb_f(1., 1., 1.),
+			stats_left + pad / 2.,
+			text_y,
+			FontAlign::Left,
+			&format!(
+				"Cast Speed: {}%",
+				utils::nice_float(100. * stats.values.cast_speed, 2)
+			),
+		);
+		text_y += lh;
+
+		state.core.draw_text(
+			state.ui_font(),
+			Color::from_rgb_f(1., 1., 1.),
+			stats_left + pad / 2.,
+			text_y,
+			FontAlign::Left,
+			&format!(
+				"Skill Duration: {}%",
+				utils::nice_float(100. * stats.values.skill_duration, 2)
+			),
+		);
+		text_y += lh;
+
+		state.core.draw_text(
+			state.ui_font(),
+			Color::from_rgb_f(1., 1., 1.),
+			stats_left + pad / 2.,
+			text_y,
+			FontAlign::Left,
+			&format!(
+				"Criticals: {}% for {}x",
+				utils::nice_float(100. * stats.values.critical_chance, 2),
+				utils::nice_float(stats.values.critical_multiplier, 2)
+			),
+		);
+		//text_y += lh;
 
 		let mut text_y = cur_item_top + pad / 2.;
 
 		if let Some(item) = inventory.slots[self.selection as usize].as_ref()
 		{
+			let item_color = [magic, rare][item.rarity as usize];
 			state.prim.draw_filled_rectangle(
 				cur_item_left,
 				cur_item_top,
@@ -398,11 +672,37 @@ impl InventoryScreen
 				}
 				state.core.draw_text(
 					state.ui_font(),
-					Color::from_rgb_f(1., 1., 1.),
+					item_color,
 					cur_item_center,
 					text_y,
 					FontAlign::Centre,
 					&name,
+				);
+				text_y += lh;
+			}
+			text_y += lh / 2.;
+
+			for (prefix, tier, frac) in &item.prefixes
+			{
+				state.core.draw_text(
+					state.ui_font(),
+					Color::from_rgb_f(1., 1., 1.),
+					cur_item_center,
+					text_y,
+					FontAlign::Centre,
+					&prefix.get_mod_string(*tier, *frac),
+				);
+				text_y += lh;
+			}
+			for (suffix, tier, frac) in &item.suffixes
+			{
+				state.core.draw_text(
+					state.ui_font(),
+					Color::from_rgb_f(1., 1., 1.),
+					cur_item_center,
+					text_y,
+					FontAlign::Centre,
+					&suffix.get_mod_string(*tier, *frac),
 				);
 				text_y += lh;
 			}
@@ -414,6 +714,7 @@ impl InventoryScreen
 			.nearby_item
 			.and_then(|id| map.world.get::<&comps::Item>(id).ok())
 		{
+			let item_color = [magic, rare][item.rarity as usize];
 			state.prim.draw_filled_rectangle(
 				ground_item_left,
 				ground_item_top,
@@ -430,11 +731,37 @@ impl InventoryScreen
 				}
 				state.core.draw_text(
 					state.ui_font(),
-					Color::from_rgb_f(1., 1., 1.),
+					item_color,
 					ground_item_center,
 					text_y,
 					FontAlign::Centre,
 					&name,
+				);
+				text_y += lh;
+			}
+			text_y += lh / 2.;
+
+			for (prefix, tier, frac) in &item.prefixes
+			{
+				state.core.draw_text(
+					state.ui_font(),
+					Color::from_rgb_f(1., 1., 1.),
+					ground_item_center,
+					text_y,
+					FontAlign::Centre,
+					&prefix.get_mod_string(*tier, *frac),
+				);
+				text_y += lh;
+			}
+			for (suffix, tier, frac) in &item.suffixes
+			{
+				state.core.draw_text(
+					state.ui_font(),
+					Color::from_rgb_f(1., 1., 1.),
+					ground_item_center,
+					text_y,
+					FontAlign::Centre,
+					&suffix.get_mod_string(*tier, *frac),
 				);
 				text_y += lh;
 			}
@@ -729,7 +1056,7 @@ fn spawn_enemy(
 		comps::Solid {
 			size: 8.,
 			mass: 10.,
-			kind: comps::CollisionKind::SmallEnemy,
+			kind: comps::CollisionKind::BigEnemy,
 		},
 		comps::AI::new(),
 		comps::Stats::new(comps::StatValues::new_enemy()),
@@ -818,8 +1145,12 @@ fn spawn_item(
 	pos: Point3<f32>, vel_pos: Vector3<f32>, item: comps::Item, world: &mut hecs::World,
 ) -> Result<hecs::Entity>
 {
+	let mut appearance = comps::Appearance::new("data/item.cfg");
+	appearance.palette = Some(
+		["data/item_magic_pal.png", "data/item_rare_pal.png"][item.rarity as usize].to_string(),
+	);
 	let entity = world.spawn((
-		comps::Appearance::new("data/item.cfg"),
+		appearance,
 		comps::Position::new(pos),
 		comps::Velocity { pos: vel_pos },
 		comps::Acceleration {
@@ -1174,12 +1505,18 @@ impl Map
 
 		let player = spawn_player(spawn_pos, &mut world)?;
 
-		spawn_item(
-			Point3::new(32., 0., 0.),
-			Vector3::new(0., 0., 128.),
-			comps::generate_item(comps::ItemKind::Red, 6, 3, &mut thread_rng()),
-			&mut world,
-		)?;
+		for i in 0..5
+		{
+			for j in 0..5
+			{
+				spawn_item(
+					Point3::new(32. + 16. * i as f32, 16. * j as f32, 0.),
+					Vector3::new(0., 0., 128.),
+					comps::generate_item(comps::ItemKind::Blue, 7, 30, &mut thread_rng()),
+					&mut world,
+				)?;
+			}
+		}
 
 		let crystal = spawn_crystal(
 			Point3::new(300., 300., 0.),
@@ -1741,7 +2078,7 @@ impl Map
 				.query::<(&comps::Position, &comps::Item)>()
 				.iter()
 			{
-				let dist = (player_pos - position.pos).norm();
+				let dist = (player_pos - position.pos).xy().norm();
 				if dist < 32.
 				{
 					if let Some((_, best_dist)) = best
@@ -2016,7 +2353,7 @@ impl Map
 			{
 				blade_blade.time_to_hit = state.time() + 0.5 / blade_blade.num_blades as f64;
 
-				let r = stats.values.area_of_effect.sqrt();
+				let r = 32. * stats.values.area_of_effect.sqrt();
 				let rv = Vector2::new(r, r);
 				let entries =
 					grid.query_rect(position.pos.xy() - rv, position.pos.xy() + rv, |other| {
@@ -2492,7 +2829,7 @@ impl Map
 
 			for blade in 0..blade_blade.num_blades
 			{
-				let r = stats.values.area_of_effect.sqrt() * radii[blade as usize];
+				let r = 32. * stats.values.area_of_effect.sqrt() * radii[blade as usize];
 
 				let theta = 2.
 					* std::f64::consts::PI

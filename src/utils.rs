@@ -381,6 +381,95 @@ pub fn intersect_segment_segment(
 	(v1 - v2).norm_squared() < eps
 }
 
+pub fn draw_text(
+	core: &Core, font: &Font, color: Color, x: f32, y: f32, align: FontAlign, text: &str,
+) -> f32
+{
+	core.draw_text(font, color, x, y, align, text);
+	font.get_text_width(text) as f32
+}
+
+pub fn nice_float(f: f32, max_frac_digits: usize) -> String
+{
+	let res = format!("{:.1$}", f, max_frac_digits);
+	let res = if res.contains('.')
+	{
+		res.trim_end_matches('0').trim_end_matches('.').to_string()
+	}
+	else
+	{
+		res
+	};
+	if res.is_empty()
+	{
+		return "0".into();
+	}
+	else
+	{
+		return res;
+	}
+
+	// let sign = f.signum();
+	// let f = f.abs();
+	// let ipart = f.round() as i32;
+	// let mut fpart = f - ipart as f32;
+
+	// let mut digits = vec![];
+	// let mut nonzero_idx = 0;
+	// for i in 1..max_frac_digits + 1
+	// {
+	// 	fpart *= 10.;
+	// 	let digit = fpart.round() as i32;
+	// 	if digit != 0
+	// 	{
+	// 		nonzero_idx = i;
+	// 	}
+	// 	fpart = fpart - digit as f32;
+	// 	if fpart < 0.
+	// 	{
+	// 		fpart = 0.;
+	// 	}
+	// 	digits.push(digit)
+	// }
+	// let mut ret = String::new();
+	// if sign < 0.
+	// {
+	// 	ret.push('-');
+	// }
+	// ret.push_str(&ipart.to_string());
+	// if nonzero_idx > 0
+	// {
+	// 	ret.push_str(".");
+	// 	for (i, digit) in digits.iter().enumerate()
+	// 	{
+	// 		if i + 1 > nonzero_idx as usize
+	// 		{
+	// 			break;
+	// 		}
+	// 		ret.push_str(&digit.to_string());
+	// 	}
+	// }
+	// ret
+}
+
+#[test]
+fn nice_float_test()
+{
+	assert_eq!("15", nice_float(15., 2));
+	assert_eq!("0", nice_float(0., 2));
+	assert_eq!("0.1", nice_float(0.1, 2));
+	assert_eq!("0.11", nice_float(0.11, 2));
+	assert_eq!("-0.11", nice_float(-0.11, 2));
+	assert_eq!("0.5", nice_float(0.499999, 2));
+	assert_eq!("0.04", nice_float(0.04, 2));
+	assert_eq!("0.02", nice_float(0.019, 2));
+	assert_eq!("0.01", nice_float(0.009, 2));
+	assert_eq!("1.8", nice_float(100. * 0.018000001, 2));
+	assert_eq!("121", nice_float(120.99999, 2));
+	assert_eq!("100", nice_float(100., 2));
+	assert_eq!("100.1", nice_float(100.1, 2));
+}
+
 #[test]
 fn test_nearest_line_point()
 {
