@@ -203,15 +203,27 @@ pub struct AI
 	pub state: AIState,
 	pub next_state_time: f64,
 	pub target: Option<hecs::Entity>,
+	pub attack_range: f32,
 }
 
 impl AI
 {
-	pub fn new() -> Self
+	pub fn new_ranged() -> Self
 	{
 		Self {
 			state: AIState::Idle,
 			next_state_time: 0.,
+			attack_range: 96.,
+			target: None,
+		}
+	}
+
+	pub fn new_melee() -> Self
+	{
+		Self {
+			state: AIState::Idle,
+			next_state_time: 0.,
+			attack_range: 24.,
 			target: None,
 		}
 	}
@@ -339,7 +351,7 @@ impl StatValues
 
 			critical_chance: 0.05,
 			critical_multiplier: 2.,
-			//physical_damage: 10.,
+			physical_damage: 10.,
 			//fire_damage: 5.,
 			//chance_to_ignite: 1.,
 			//lightning_damage: 5.,
@@ -371,6 +383,8 @@ impl StatValues
 			chance_to_ignite: 0.5,
 			chance_to_freeze: 0.5,
 			chance_to_shock: 0.5,
+
+			area_of_effect: 1.,
 			..Self::default()
 		}
 	}
@@ -574,6 +588,7 @@ impl Stats
 		{
 			self.values.cast_speed = 0.;
 			self.values.acceleration = 0.;
+			self.values.jump_strength = 0.;
 		}
 	}
 
@@ -715,6 +730,7 @@ impl Stats
 pub enum AttackKind
 {
 	BladeBlade,
+	Slam,
 	Fireball,
 }
 

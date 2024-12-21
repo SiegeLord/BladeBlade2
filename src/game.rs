@@ -34,6 +34,9 @@ impl Game
 	{
 		//dbg!(100. * comps::ItemPrefix::ManaRegen.get_value(24, 0.15291262));
 		//return Err("Foo".to_string().into());
+		state.cache_sprite("data/slam.cfg")?;
+		state.cache_sprite("data/archer.cfg")?;
+		state.cache_sprite("data/melee.cfg")?;
 		state.cache_sprite("data/player.cfg")?;
 		state.cache_sprite("data/fireball.cfg")?;
 		state.cache_sprite("data/fire_hit.cfg")?;
@@ -1048,8 +1051,8 @@ fn spawn_enemy(
 	pos: Point3<f32>, crystal_id: hecs::Entity, world: &mut hecs::World,
 ) -> Result<hecs::Entity>
 {
-	let mut appearance = comps::Appearance::new("data/player.cfg");
-	appearance.palette = Some("data/player_pal2.png".to_string());
+	let appearance = comps::Appearance::new("data/melee.cfg");
+	//appearance.palette = Some("data/player_pal2.png".to_string());
 	let entity = world.spawn((
 		appearance,
 		comps::StatusAppearance::new(),
@@ -1065,9 +1068,9 @@ fn spawn_enemy(
 			mass: 10.,
 			kind: comps::CollisionKind::BigEnemy,
 		},
-		comps::AI::new(),
+		comps::AI::new_melee(),
 		comps::Stats::new(comps::StatValues::new_enemy()),
-		comps::Attack::new(comps::AttackKind::Fireball),
+		comps::Attack::new(comps::AttackKind::Slam),
 		comps::CastsShadow,
 		comps::Controller::new(),
 		comps::OnDeathEffect {
@@ -1294,9 +1297,11 @@ fn spawn_power_sphere(
 	Ok(entity)
 }
 
-fn spawn_fire_hit(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
+fn spawn_explosion(
+	pos: Point3<f32>, appearance: &str, world: &mut hecs::World,
+) -> Result<hecs::Entity>
 {
-	let mut appearance = comps::Appearance::new("data/fire_hit.cfg");
+	let mut appearance = comps::Appearance::new(appearance);
 	appearance.bias = 1;
 	let entity = world.spawn((
 		appearance,
@@ -1659,7 +1664,7 @@ impl Map
 			let chase_time = 1.;
 			let attack_time = 1.;
 			let sense_range = 104.;
-			let attack_range = 96.;
+			let attack_range = ai.attack_range;
 
 			// TODO: Better target acquisition.
 			let mut target = None;
@@ -2042,6 +2047,7 @@ impl Map
 		// Attacking.
 		let mut spawn_fns: Vec<Box<dyn FnOnce(&mut Map) -> Result<hecs::Entity>>> = vec![];
 		let mut blade_blade_activations = vec![];
+		let mut slam_activations = vec![];
 		for (id, (appearance, position, attack, stats)) in self
 			.world
 			.query::<(
@@ -2054,7 +2060,6 @@ impl Map
 		{
 			if attack.want_attack
 			{
-				let dir = (attack.target_position - position.pos).normalize();
 				for _ in 0..appearance.animation_state.drain_activations()
 				{
 					let mana_cost = self.level as f32 * 10.;
@@ -2066,10 +2071,10 @@ impl Map
 							comps::AttackKind::Fireball =>
 							{
 								// TODO: Spawn position?
+								let dir = (attack.target_position - position.pos).normalize();
 								let pos = position.pos.clone();
 								let time = state.time();
 								let stat_values = stats.values;
-								dbg!(stat_values.physical_damage);
 								spawn_fns.push(Box::new(move |map| {
 									spawn_fireball(
 										pos + Vector3::new(0., 0., 16.),
@@ -2080,6 +2085,15 @@ impl Map
 										&mut map.world,
 									)
 								}));
+							}
+							comps::AttackKind::Slam =>
+							{
+								let dir = Vector3::new(position.dir.cos(), position.dir.sin(), 0.);
+								let pos = position.pos + 14. * dir;
+								spawn_fns.push(Box::new(move |map| {
+									spawn_explosion(pos, "data/slam.cfg", &mut map.world)
+								}));
+								slam_activations.push((id, pos, stats.values, 16.));
 							}
 							comps::AttackKind::BladeBlade =>
 							{
@@ -2423,51 +2437,55 @@ impl Map
 			if state.time() > blade_blade.time_to_hit && blade_blade.num_blades > 0
 			{
 				blade_blade.time_to_hit = state.time() + 0.5 / blade_blade.num_blades as f64;
+				slam_activations.push((id, position.pos, stats.values, 32.));
+			}
+		}
 
-				let r = 32. * stats.values.area_of_effect.sqrt();
-				let rv = Vector2::new(r, r);
-				let entries =
-					grid.query_rect(position.pos.xy() - rv, position.pos.xy() + rv, |other| {
-						let other_id = other.inner.id;
-						if id == other_id
-						{
-							false
-						}
-						else if let Some(other_stats) = self
-							.world
-							.query_one::<&comps::Stats>(other_id)
-							.unwrap()
-							.get()
-						{
-							stats.values.team.can_damage(other_stats.values.team)
-						}
-						else
-						{
-							false
-						}
-					});
-				for entry in entries
+		// Slam activations
+		for (id, pos, values, radius) in slam_activations
+		{
+			let r = radius * values.area_of_effect.sqrt();
+			let rv = Vector2::new(r, r);
+			let entries = grid.query_rect(pos.xy() - rv, pos.xy() + rv, |other| {
+				let other_id = other.inner.id;
+				if id == other_id
 				{
-					let other_id = entry.inner.id;
-					if let Some(other_position) = self
-						.world
-						.query_one::<&comps::Position>(other_id)
-						.unwrap()
-						.get()
+					false
+				}
+				else if let Some(other_stats) = self
+					.world
+					.query_one::<&comps::Stats>(other_id)
+					.unwrap()
+					.get()
+				{
+					values.team.can_damage(other_stats.values.team)
+				}
+				else
+				{
+					false
+				}
+			});
+			for entry in entries
+			{
+				let other_id = entry.inner.id;
+				if let Some(other_position) = self
+					.world
+					.query_one::<&comps::Position>(other_id)
+					.unwrap()
+					.get()
+				{
+					let diff_xy = pos.xy() - other_position.pos.xy();
+					let diff_z = pos.z - other_position.pos.z;
+					if diff_xy.norm() < r && diff_z.abs() < 16.
 					{
-						let diff_xy = position.pos.xy() - other_position.pos.xy();
-						let diff_z = position.pos.z - other_position.pos.z;
-						if diff_xy.norm() < r && diff_z.abs() < 16.
-						{
-							effects.push((
-								id,
-								Some(other_id),
-								vec![
-									comps::Effect::SpawnFireHit,
-									comps::Effect::DoDamage(stats.values, stats.values.team),
-								],
-							));
-						}
+						effects.push((
+							id,
+							Some(other_id),
+							vec![
+								comps::Effect::SpawnFireHit,
+								comps::Effect::DoDamage(values, values.team),
+							],
+						));
 					}
 				}
 			}
@@ -2540,8 +2558,9 @@ impl Map
 
 						if let Some(pos) = pos
 						{
-							spawn_fns
-								.push(Box::new(move |map| spawn_fire_hit(pos, &mut map.world)));
+							spawn_fns.push(Box::new(move |map| {
+								spawn_explosion(pos, "data/fire_hit.cfg", &mut map.world)
+							}));
 						}
 					}
 					(comps::Effect::DoDamage(damage_stat_values, team), other_id) =>
