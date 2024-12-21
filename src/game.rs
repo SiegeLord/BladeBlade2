@@ -40,6 +40,9 @@ impl Game
 		state.cache_sprite("data/player.cfg")?;
 		state.cache_sprite("data/fireball.cfg")?;
 		state.cache_sprite("data/fire_hit.cfg")?;
+		state.cache_sprite("data/normal_hit.cfg")?;
+		state.cache_sprite("data/cold_hit.cfg")?;
+		state.cache_sprite("data/lightning_hit.cfg")?;
 		state.cache_sprite("data/shadow.cfg")?;
 		state.cache_sprite("data/terrain.cfg")?;
 		state.cache_sprite("data/crystal_red.cfg")?;
@@ -54,6 +57,12 @@ impl Game
 		state.cache_sprite("data/item.cfg")?;
 		state.cache_sprite("data/shocked.cfg")?;
 		state.cache_sprite("data/ignited.cfg")?;
+		state.cache_sprite("data/arrow_normal.cfg")?;
+		state.cache_sprite("data/arrow_cold.cfg")?;
+		state.cache_sprite("data/arrow_lightning.cfg")?;
+		state.cache_sprite("data/cold_enchanted.cfg")?;
+		state.cache_sprite("data/lightning_enchanted.cfg")?;
+		state.cache_sprite("data/fire_enchanted.cfg")?;
 
 		Ok(Self {
 			map: Map::new(state)?,
@@ -325,7 +334,7 @@ impl InventoryScreen
 				.world
 				.query_one_mut::<(&comps::Inventory, &mut comps::Stats)>(map.player)
 			{
-				stats.reset(state, Some(inventory))
+				stats.reset(state.time(), map.level, Some(inventory))
 			}
 		}
 
@@ -663,7 +672,7 @@ impl InventoryScreen
 
 		if let Some(item) = inventory.slots[self.selection as usize].as_ref()
 		{
-			let item_color = [magic, rare][item.rarity as usize];
+			let item_color = [magic, rare][item.rarity as usize - 1];
 			state.prim.draw_filled_rectangle(
 				cur_item_left,
 				cur_item_top,
@@ -722,7 +731,7 @@ impl InventoryScreen
 			.nearby_item
 			.and_then(|id| map.world.get::<&comps::Item>(id).ok())
 		{
-			let item_color = [magic, rare][item.rarity as usize];
+			let item_color = [magic, rare][item.rarity as usize - 1];
 			state.prim.draw_filled_rectangle(
 				ground_item_left,
 				ground_item_top,
@@ -1014,6 +1023,39 @@ impl Scene
 	}
 }
 
+struct DamageSprites
+{
+	arrow: &'static str,
+	hit: &'static str,
+}
+
+fn damage_sprites(values: &comps::StatValues) -> DamageSprites
+{
+	let damage_idx = [
+		values.physical_damage as i32,
+		values.fire_damage as i32,
+		values.cold_damage as i32,
+		values.lightning_damage as i32,
+	]
+	.iter()
+	.enumerate()
+	.max_by_key(|(_, &v)| v)
+	.unwrap()
+	.0;
+
+	let (arrow, hit) = [
+		("data/arrow_normal.cfg", "data/normal_hit.cfg"),
+		("data/fireball.cfg", "data/fire_hit.cfg"),
+		("data/arrow_cold.cfg", "data/cold_hit.cfg"),
+		("data/arrow_lightning.cfg", "data/lightning_hit.cfg"),
+	][damage_idx];
+
+	DamageSprites {
+		arrow: arrow,
+		hit: hit,
+	}
+}
+
 fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
 {
 	let inventory = comps::Inventory::new();
@@ -1047,15 +1089,239 @@ fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entit
 	Ok(entity)
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum EnemyAffix
+{
+	ExtraStrong,
+	ExtraFast,
+	ColdEnchanted,
+	FireEnchanted,
+	LightningEnchanted,
+	MultiShot,
+}
+
 fn spawn_enemy(
-	pos: Point3<f32>, crystal_id: hecs::Entity, world: &mut hecs::World,
+	pos: Point3<f32>, crystal_id: hecs::Entity, rarity: comps::Rarity, ranged: bool, level: i32,
+	world: &mut hecs::World, rng: &mut impl Rng,
 ) -> Result<hecs::Entity>
 {
-	let appearance = comps::Appearance::new("data/melee.cfg");
+	let (ai, mut appearance, attack) = if ranged
+	{
+		(
+			comps::AI::new_ranged(pos),
+			comps::Appearance::new("data/archer.cfg"),
+			comps::AttackKind::Fireball(rarity),
+		)
+	}
+	else
+	{
+		(
+			comps::AI::new_melee(pos),
+			comps::Appearance::new("data/melee.cfg"),
+			comps::AttackKind::Slam,
+		)
+	};
+
+	appearance.palette = Some(
+		match rarity
+		{
+			comps::Rarity::Normal => "data/elf_normal_pal.png",
+			comps::Rarity::Magic => "data/elf_cold_pal.png",
+			comps::Rarity::Rare => [
+				"data/elf_rare_1_pal.png",
+				"data/elf_rare_2_pal.png",
+				"data/elf_rare_3_pal.png",
+				"data/elf_rare_4_pal.png",
+			]
+			.choose(rng)
+			.unwrap(),
+		}
+		.to_string(),
+	);
+
+	let level = match rarity
+	{
+		comps::Rarity::Normal => level,
+		comps::Rarity::Magic => level + 1,
+		comps::Rarity::Rare => level + 2,
+	};
+
+	let values = comps::StatValues::new_enemy(level, rarity);
+
+	let all_affixes = [
+		EnemyAffix::ExtraStrong,
+		EnemyAffix::ExtraFast,
+		EnemyAffix::ColdEnchanted,
+		EnemyAffix::FireEnchanted,
+		EnemyAffix::LightningEnchanted,
+		EnemyAffix::MultiShot,
+	];
+
+	let mut affixes = vec![];
+	match rarity
+	{
+		comps::Rarity::Normal => (),
+		comps::Rarity::Magic =>
+		{
+			affixes.push(*all_affixes.choose(rng).unwrap());
+		}
+		comps::Rarity::Rare =>
+		{
+			let num_affixes = if level > 10
+			{
+				1
+			}
+			else if level > 5
+			{
+				2
+			}
+			else
+			{
+				3
+			};
+
+			while affixes.len() < num_affixes
+			{
+				let affix = all_affixes.choose(rng).unwrap();
+				if affixes.iter().find(|p| *p == affix).is_none()
+				{
+					affixes.push(*affix);
+				}
+			}
+		}
+	}
+
+	let mut inventory = comps::Inventory::new();
+	let mut effects = vec![];
+	let mut inventory_idx = 0;
+	let item_level = (level as f32 * (1.1_f32).powf((level - 1) as f32)) as i32;
+	for affix in &affixes
+	{
+		match affix
+		{
+			EnemyAffix::ColdEnchanted =>
+			{
+				effects.push(comps::Appearance::new_with_bias(
+					"data/cold_enchanted.cfg",
+					-1,
+				));
+				inventory.slots[inventory_idx] = Some(comps::Item {
+					name: vec![],
+					appearance: comps::Appearance::new("data/ring_red.cfg"),
+					rarity: comps::Rarity::Rare,
+					prefixes: vec![
+						(
+							comps::ItemPrefix::AddedColdDamage,
+							item_level,
+							rng.gen_range(0.0..1.0),
+						),
+						(comps::ItemPrefix::ChanceToFreeze, 50, 1.),
+					],
+					suffixes: vec![(comps::ItemSuffix::ColdResistance, 10, 1.)],
+				});
+				inventory_idx += 1;
+			}
+			EnemyAffix::FireEnchanted =>
+			{
+				effects.push(comps::Appearance::new_with_bias(
+					"data/fire_enchanted.cfg",
+					-1,
+				));
+				inventory.slots[inventory_idx] = Some(comps::Item {
+					name: vec![],
+					appearance: comps::Appearance::new("data/ring_red.cfg"),
+					rarity: comps::Rarity::Rare,
+					prefixes: vec![
+						(
+							comps::ItemPrefix::AddedFireDamage,
+							item_level,
+							rng.gen_range(0.0..1.0),
+						),
+						(comps::ItemPrefix::ChanceToIgnite, 50, 1.),
+					],
+					suffixes: vec![(comps::ItemSuffix::FireResistance, 10, 1.)],
+				});
+				inventory_idx += 1;
+			}
+			EnemyAffix::LightningEnchanted =>
+			{
+				effects.push(comps::Appearance::new_with_bias(
+					"data/lightning_enchanted.cfg",
+					-1,
+				));
+				inventory.slots[inventory_idx] = Some(comps::Item {
+					name: vec![],
+					appearance: comps::Appearance::new("data/ring_red.cfg"),
+					rarity: comps::Rarity::Rare,
+					prefixes: vec![
+						(
+							comps::ItemPrefix::AddedLightningDamage,
+							item_level,
+							rng.gen_range(0.0..1.0),
+						),
+						(comps::ItemPrefix::ChanceToShock, 50, 1.),
+					],
+					suffixes: vec![(comps::ItemSuffix::LightningResistance, 10, 1.)],
+				});
+				inventory_idx += 1;
+			}
+			EnemyAffix::MultiShot =>
+			{
+				inventory.slots[inventory_idx] = Some(comps::Item {
+					name: vec![],
+					appearance: comps::Appearance::new("data/ring_red.cfg"),
+					rarity: comps::Rarity::Rare,
+					prefixes: vec![(comps::ItemPrefix::MultiShot, 1, 1.)],
+					suffixes: vec![],
+				});
+				inventory_idx += 1;
+			}
+			EnemyAffix::ExtraFast =>
+			{
+				inventory.slots[inventory_idx] = Some(comps::Item {
+					name: vec![],
+					appearance: comps::Appearance::new("data/ring_red.cfg"),
+					rarity: comps::Rarity::Rare,
+					prefixes: vec![
+						(comps::ItemPrefix::CastSpeed, 10, 1.),
+						(comps::ItemPrefix::MoveSpeed, 50, 1.),
+					],
+					suffixes: vec![],
+				});
+				inventory_idx += 1;
+			}
+			EnemyAffix::ExtraStrong =>
+			{
+				inventory.slots[inventory_idx] = Some(comps::Item {
+					name: vec![],
+					appearance: comps::Appearance::new("data/ring_red.cfg"),
+					rarity: comps::Rarity::Rare,
+					suffixes: vec![
+						(comps::ItemSuffix::IncreasedPhysicalDamage, 10, 1.),
+						(comps::ItemSuffix::IncreasedColdDamage, 10, 1.),
+						(comps::ItemSuffix::IncreasedFireDamage, 10, 1.),
+						(comps::ItemSuffix::IncreasedLightningDamage, 10, 1.),
+					],
+					prefixes: vec![],
+				});
+				inventory_idx += 1;
+			}
+		}
+	}
+
+	if affixes.len() > 0
+	{
+		dbg!(&affixes);
+		dbg!(&inventory.slots);
+		let mut values = comps::Stats::new(values.clone());
+		values.reset(0., 0, Some(&inventory));
+		dbg!(values.values);
+	}
+
 	//appearance.palette = Some("data/player_pal2.png".to_string());
 	let entity = world.spawn((
 		appearance,
-		comps::StatusAppearance::new(),
+		comps::StatusAppearance::new_with_effects(effects),
 		comps::Position::new(pos),
 		comps::Velocity {
 			pos: Vector3::zeros(),
@@ -1065,12 +1331,12 @@ fn spawn_enemy(
 		},
 		comps::Solid {
 			size: 8.,
-			mass: 10.,
+			mass: if ranged { 30. } else { 10. },
 			kind: comps::CollisionKind::BigEnemy,
 		},
-		comps::AI::new_melee(),
-		comps::Stats::new(comps::StatValues::new_enemy()),
-		comps::Attack::new(comps::AttackKind::Slam),
+		ai,
+		comps::Stats::new(values),
+		comps::Attack::new(attack),
 		comps::CastsShadow,
 		comps::Controller::new(),
 		comps::OnDeathEffect {
@@ -1079,6 +1345,7 @@ fn spawn_enemy(
 				comps::Effect::SpawnSoul(crystal_id),
 			],
 		},
+		inventory,
 	));
 	Ok(entity)
 }
@@ -1113,7 +1380,9 @@ fn spawn_crystal(
 	Ok(entity)
 }
 
-fn spawn_from_crystal(id: hecs::Entity, world: &mut hecs::World) -> Result<()>
+fn spawn_from_crystal(
+	id: hecs::Entity, level: i32, world: &mut hecs::World, rng: &mut impl Rng,
+) -> Result<()>
 {
 	let mut vals = None;
 	if let Ok((position, crystal)) = world.query_one_mut::<(&comps::Position, &comps::Crystal)>(id)
@@ -1121,17 +1390,49 @@ fn spawn_from_crystal(id: hecs::Entity, world: &mut hecs::World) -> Result<()>
 		vals = Some((position.pos, crystal.level));
 	}
 
-	let count = if let Some((pos, level)) = vals
+	let count = if let Some((pos, crystal_level)) = vals
 	{
-		let count = 1 + level;
-		let mut rng = thread_rng();
+		let mut count = 3 + crystal_level;
 
+		let weights = if level > 3
+		{
+			(6, 2, 1)
+		}
+		else if level > 1
+		{
+			(3, 1, 0)
+		}
+		else
+		{
+			(1, 0, 0)
+		};
+
+		let rarity = [
+			(comps::Rarity::Normal, weights.0),
+			(comps::Rarity::Magic, weights.1),
+			(comps::Rarity::Rare, weights.2),
+		]
+		.choose_weighted(rng, |&(_, w)| w)
+		.unwrap()
+		.0;
+
+		if rarity == comps::Rarity::Rare
+		{
+			count = 1;
+		}
+
+		let enemy_rng_base = StdRng::from_seed(rng.gen());
 		for _ in 0..count
 		{
+			let mut enemy_rng = enemy_rng_base.clone();
 			spawn_enemy(
 				pos + Vector3::new(rng.gen_range(-5.0..5.0), rng.gen_range(-5.0..5.0), 0.0),
 				id,
+				rarity,
+				enemy_rng.gen_bool(0.5),
+				level,
 				world,
+				&mut enemy_rng,
 			)?;
 		}
 		count
@@ -1157,7 +1458,7 @@ fn spawn_item(
 {
 	let mut appearance = comps::Appearance::new("data/item.cfg");
 	appearance.palette = Some(
-		["data/item_magic_pal.png", "data/item_rare_pal.png"][item.rarity as usize].to_string(),
+		["data/item_magic_pal.png", "data/item_rare_pal.png"][item.rarity as usize - 1].to_string(),
 	);
 	let entity = world.spawn((
 		appearance,
@@ -1220,12 +1521,15 @@ fn spawn_corpse(
 
 fn spawn_fireball(
 	pos: Point3<f32>, velocity_pos: Vector3<f32>, acceleration_pos: Vector3<f32>,
-	damage_stat_values: comps::StatValues, time: f64, world: &mut hecs::World,
+	damage_stat_values: comps::StatValues, rarity: comps::Rarity, time: f64,
+	world: &mut hecs::World,
 ) -> Result<hecs::Entity>
 {
+	let sprites = damage_sprites(&damage_stat_values);
+
 	let team = comps::Team::Enemy;
 	let entity = world.spawn((
-		comps::Appearance::new("data/fireball.cfg"),
+		comps::Appearance::new(sprites.arrow),
 		comps::Position::new(pos),
 		comps::Velocity { pos: velocity_pos },
 		comps::Acceleration {
@@ -1241,12 +1545,12 @@ fn spawn_fireball(
 		comps::OnContactEffect {
 			effects: vec![
 				comps::Effect::Die,
-				comps::Effect::SpawnFireHit,
+				comps::Effect::SpawnExplosion(sprites.hit.to_string()),
 				comps::Effect::DoDamage(damage_stat_values, team),
 			],
 		},
 		comps::OnDeathEffect {
-			effects: vec![comps::Effect::SpawnFireHit],
+			effects: vec![comps::Effect::SpawnExplosion(sprites.hit.to_string())],
 		},
 		comps::CastsShadow,
 	));
@@ -1519,6 +1823,8 @@ impl Map
 
 		let player = spawn_player(spawn_pos, &mut world)?;
 
+		let level = 1;
+
 		for i in 0..5
 		{
 			for j in 0..5
@@ -1526,37 +1832,47 @@ impl Map
 				spawn_item(
 					Point3::new(32. + 16. * i as f32, 16. * j as f32, 0.),
 					Vector3::new(0., 0., 128.),
-					comps::generate_item(comps::ItemKind::Red, 7, 30, &mut thread_rng()),
+					comps::generate_item(
+						[
+							comps::ItemKind::Red,
+							comps::ItemKind::Blue,
+							comps::ItemKind::Green,
+						][i % 3],
+						7,
+						level,
+						&mut thread_rng(),
+					),
 					&mut world,
 				)?;
 			}
 		}
 
+		let mut rng = thread_rng();
 		let crystal = spawn_crystal(
 			Point3::new(300., 300., 0.),
 			comps::ItemKind::Red,
 			&mut world,
 		)?;
-		spawn_from_crystal(crystal, &mut world)?;
+		spawn_from_crystal(crystal, level, &mut world, &mut rng)?;
 		let crystal = spawn_crystal(
 			Point3::new(200., 200., 0.),
 			comps::ItemKind::Green,
 			&mut world,
 		)?;
-		spawn_from_crystal(crystal, &mut world)?;
+		spawn_from_crystal(crystal, level, &mut world, &mut rng)?;
 		let crystal = spawn_crystal(
 			Point3::new(300., 200., 0.),
 			comps::ItemKind::Blue,
 			&mut world,
 		)?;
-		spawn_from_crystal(crystal, &mut world)?;
+		spawn_from_crystal(crystal, level, &mut world, &mut rng)?;
 
 		let crystal = spawn_crystal(
 			Point3::new(300., 400., 0.),
 			comps::ItemKind::Blue,
 			&mut world,
 		)?;
-		spawn_from_crystal(crystal, &mut world)?;
+		spawn_from_crystal(crystal, 1, &mut world, &mut rng)?;
 
 		Ok(Self {
 			world: world,
@@ -1567,7 +1883,7 @@ impl Map
 			show_depth: false,
 			nearby_item: None,
 			inventory_shown: false,
-			level: 1,
+			level: level,
 		})
 	}
 
@@ -1613,7 +1929,11 @@ impl Map
 			if stats.life > 0.
 			{
 				let inventory = self.world.get::<&comps::Inventory>(id).ok();
-				stats.reset(state, inventory.as_deref());
+				stats.reset(
+					state.time(),
+					if id == self.player { self.level } else { 0 },
+					inventory.as_deref(),
+				);
 				stats.logic(state);
 			}
 			else
@@ -1664,6 +1984,7 @@ impl Map
 			let chase_time = 1.;
 			let attack_time = 1.;
 			let sense_range = 104.;
+			let leash_range = 64.;
 			let attack_range = ai.attack_range;
 
 			// TODO: Better target acquisition.
@@ -1706,7 +2027,7 @@ impl Map
 			if let Some(target_position) = target_position.as_ref()
 			{
 				let dist = (target_position.pos - position.pos).norm();
-				if dist > 2. * sense_range
+				if dist > 1.5 * sense_range
 				{
 					target = None;
 				}
@@ -1742,9 +2063,17 @@ impl Map
 						{
 							Some(comps::AIState::Wander) =>
 							{
-								let dir_x = rng.gen_range(-1..=1) as f32;
-								let dir_y = rng.gen_range(-1..=1) as f32;
-								controller.want_move = Vector2::new(dir_x, dir_y);
+								let leash_diff = ai.leash.xy() - position.pos.xy();
+								if leash_diff.norm() > leash_range
+								{
+									controller.want_move = leash_diff.normalize();
+								}
+								else
+								{
+									let dir_x = rng.gen_range(-1..=1) as f32;
+									let dir_y = rng.gen_range(-1..=1) as f32;
+									controller.want_move = Vector2::new(dir_x, dir_y);
+								}
 							}
 							_ => (),
 						}
@@ -2027,21 +2356,26 @@ impl Map
 				(appearance.speed * DT) as f64,
 			);
 		}
-		for (_, status_appearance) in self.world.query::<&mut comps::StatusAppearance>().iter()
+		for (_, (stats, status_appearance)) in self
+			.world
+			.query::<(&comps::Stats, &mut comps::StatusAppearance)>()
+			.iter()
 		{
-			let appearance = &mut status_appearance.shocked;
-			let sprite = state.get_sprite(&appearance.sprite)?;
-			sprite.advance_state(
-				&mut appearance.animation_state,
-				(appearance.speed * DT) as f64,
-			);
+			status_appearance.ignite(!stats.ignite_instances.is_empty());
+			status_appearance.shock(!stats.shock_instances.is_empty());
 
-			let appearance = &mut status_appearance.ignited;
-			let sprite = state.get_sprite(&appearance.sprite)?;
-			sprite.advance_state(
-				&mut appearance.animation_state,
-				(appearance.speed * DT) as f64,
-			);
+			for appearance in status_appearance
+				.ignited
+				.iter_mut()
+				.chain(status_appearance.shocked.iter_mut())
+				.chain(status_appearance.persistent.iter_mut())
+			{
+				let sprite = state.get_sprite(&appearance.sprite)?;
+				sprite.advance_state(
+					&mut appearance.animation_state,
+					(appearance.speed * DT) as f64,
+				);
+			}
 		}
 
 		// Attacking.
@@ -2062,29 +2396,46 @@ impl Map
 			{
 				for _ in 0..appearance.animation_state.drain_activations()
 				{
-					let mana_cost = self.level as f32 * 10.;
+					let mana_cost = 5. + self.level as f32 * 3.;
 					if mana_cost <= stats.mana
 					{
 						stats.mana -= mana_cost;
 						match attack.kind
 						{
-							comps::AttackKind::Fireball =>
+							comps::AttackKind::Fireball(rarity) =>
 							{
 								// TODO: Spawn position?
 								let dir = (attack.target_position - position.pos).normalize();
 								let pos = position.pos.clone();
 								let time = state.time();
 								let stat_values = stats.values;
-								spawn_fns.push(Box::new(move |map| {
-									spawn_fireball(
-										pos + Vector3::new(0., 0., 16.),
-										dir * 100.,
-										dir * 100.,
-										stat_values,
-										time,
-										&mut map.world,
-									)
-								}));
+
+								let mut dirs = vec![dir];
+								if stats.values.multishot
+								{
+									let cross1 =
+										Vector3::new(dir.y, -dir.x, dir.z).normalize() * 0.25;
+									let cross2 =
+										Vector3::new(-dir.y, dir.x, dir.z).normalize() * 0.25;
+									dirs.push((dir + cross1).normalize());
+									dirs.push((dir + cross2).normalize());
+								}
+
+								for dir in &dirs
+								{
+									let dir = dir.clone();
+									spawn_fns.push(Box::new(move |map| {
+										spawn_fireball(
+											pos + Vector3::new(0., 0., 16.),
+											dir * 100.,
+											dir * 100.,
+											stat_values,
+											rarity,
+											time,
+											&mut map.world,
+										)
+									}))
+								}
 							}
 							comps::AttackKind::Slam =>
 							{
@@ -2269,6 +2620,11 @@ impl Map
 			.iter()
 		{
 			position.pos += DT * velocity.pos;
+			// HACK!
+			if velocity.pos.norm() == 0.
+			{
+				position.pos.set_xy(utils::round_point(position.pos.xy()));
+			}
 			if velocity.pos.xy().norm() > 0.
 			{
 				position.dir = velocity.pos.y.atan2(velocity.pos.x);
@@ -2482,7 +2838,9 @@ impl Map
 							id,
 							Some(other_id),
 							vec![
-								comps::Effect::SpawnFireHit,
+								comps::Effect::SpawnExplosion(
+									damage_sprites(&values).hit.to_string(),
+								),
 								comps::Effect::DoDamage(values, values.team),
 							],
 						));
@@ -2543,7 +2901,7 @@ impl Map
 				match (effect, other_id)
 				{
 					(comps::Effect::Die, _) => to_die.push((false, id)),
-					(comps::Effect::SpawnFireHit, other_id) =>
+					(comps::Effect::SpawnExplosion(explosion), other_id) =>
 					{
 						let mut pos = None;
 						if let Some(position) = other_id
@@ -2559,7 +2917,7 @@ impl Map
 						if let Some(pos) = pos
 						{
 							spawn_fns.push(Box::new(move |map| {
-								spawn_explosion(pos, "data/fire_hit.cfg", &mut map.world)
+								spawn_explosion(pos, &explosion, &mut map.world)
 							}));
 						}
 					}
@@ -2728,7 +3086,7 @@ impl Map
 						{
 							crystal.level = utils::min(7, crystal.level + 1);
 						}
-						spawn_from_crystal(crystal_id, &mut self.world)?;
+						spawn_from_crystal(crystal_id, self.level, &mut self.world, &mut rng)?;
 					}
 					(comps::Effect::SpawnItems(kind), _) =>
 					{
@@ -2800,7 +3158,7 @@ impl Map
 			.core
 			.use_projection_transform(&utils::mat4_to_transform(ortho_mat));
 
-		let camera_shift = &self.camera_shift(state);
+		let camera_shift = self.camera_shift(state);
 
 		// Tiles and appearances
 		let mut scene = Scene::new();
@@ -2859,13 +3217,16 @@ impl Map
 		}
 
 		// Status effects.
-		for (_, (status_appearance, position, stats)) in
-			self.world
-				.query_mut::<(&comps::StatusAppearance, &comps::Position, &comps::Stats)>()
+		for (_, (status_appearance, position)) in self
+			.world
+			.query_mut::<(&comps::StatusAppearance, &comps::Position)>()
 		{
-			if !stats.shock_instances.is_empty()
+			for appearance in status_appearance
+				.ignited
+				.iter()
+				.chain(status_appearance.shocked.iter())
+				.chain(status_appearance.persistent.iter())
 			{
-				let appearance = &status_appearance.shocked;
 				let sprite = state.get_sprite(&appearance.sprite)?;
 				let palette_index = state.palettes.get_palette_index(
 					appearance
@@ -2890,36 +3251,6 @@ impl Map
 					atlas_bmp,
 					palette_index,
 					appearance.material as i32,
-				);
-			}
-
-			if !stats.ignite_instances.is_empty()
-			{
-				let appearance = &status_appearance.ignited;
-				let sprite = state.get_sprite(&appearance.sprite)?;
-				let palette_index = state.palettes.get_palette_index(
-					appearance
-						.palette
-						.as_ref()
-						.unwrap_or(&sprite.get_palettes()[0]),
-				)?;
-
-				let draw_pos = position.draw_pos(state.alpha);
-				let pos = utils::round_point(
-					Point2::new(draw_pos.x, draw_pos.y - draw_pos.z) + camera_shift,
-				);
-
-				let (atlas_bmp, offt) = sprite.get_frame_from_state(&appearance.animation_state);
-
-				scene.add_bitmap(
-					Point3::new(
-						pos.x + offt.x,
-						pos.y + offt.y,
-						position.pos.y - self.camera_pos.pos.y + appearance.bias as f32,
-					),
-					atlas_bmp,
-					palette_index,
-					0,
 				);
 			}
 		}
@@ -3171,7 +3502,7 @@ impl Map
 
 		if let Ok(stats) = self.world.query_one_mut::<&comps::Stats>(self.player)
 		{
-			let orb_radius = 32.;
+			let orb_radius = if self.inventory_shown { 24. } else { 32. };
 			let pad = 4.;
 			let lh = state.ui_font().get_line_height() as f32;
 

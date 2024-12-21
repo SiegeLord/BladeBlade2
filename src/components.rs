@@ -70,7 +70,7 @@ pub struct Appearance
 
 impl Appearance
 {
-	pub fn new(sprite: impl Into<String>) -> Self
+	pub fn new_with_bias(sprite: impl Into<String>, bias: i32) -> Self
 	{
 		Self {
 			sprite: sprite.into(),
@@ -78,29 +78,71 @@ impl Appearance
 			animation_state: sprite::AnimationState::new("Default"),
 			speed: 1.,
 			material: Material::Default,
-			bias: 0,
+			bias,
 		}
+	}
+
+	pub fn new(sprite: impl Into<String>) -> Self
+	{
+		Self::new_with_bias(sprite, 0)
 	}
 }
 
 #[derive(Debug, Clone)]
 pub struct StatusAppearance
 {
-	pub shocked: Appearance,
-	pub ignited: Appearance,
+	pub shocked: Option<Appearance>,
+	pub ignited: Option<Appearance>,
+	pub persistent: Vec<Appearance>,
 }
 
 impl StatusAppearance
 {
 	pub fn new() -> Self
 	{
-		let mut shocked = Appearance::new("data/shocked.cfg");
-		shocked.bias = 1;
-		let mut ignited = Appearance::new("data/ignited.cfg");
-		ignited.bias = 1;
 		Self {
-			shocked: shocked,
-			ignited: ignited,
+			shocked: None,
+			ignited: None,
+			persistent: vec![],
+		}
+	}
+
+	pub fn new_with_effects(persistent: Vec<Appearance>) -> Self
+	{
+		Self {
+			shocked: None,
+			ignited: None,
+			persistent,
+		}
+	}
+
+	pub fn ignite(&mut self, apply: bool)
+	{
+		if apply
+		{
+			if self.ignited.is_none()
+			{
+				self.ignited = Some(Appearance::new_with_bias("data/ignited.cfg", 1));
+			}
+		}
+		else
+		{
+			self.ignited = None;
+		}
+	}
+
+	pub fn shock(&mut self, apply: bool)
+	{
+		if apply
+		{
+			if self.shocked.is_none()
+			{
+				self.shocked = Some(Appearance::new_with_bias("data/shocked.cfg", 1));
+			}
+		}
+		else
+		{
+			self.shocked = None;
 		}
 	}
 }
@@ -204,27 +246,30 @@ pub struct AI
 	pub next_state_time: f64,
 	pub target: Option<hecs::Entity>,
 	pub attack_range: f32,
+	pub leash: Point3<f32>,
 }
 
 impl AI
 {
-	pub fn new_ranged() -> Self
+	pub fn new_ranged(leash: Point3<f32>) -> Self
 	{
 		Self {
 			state: AIState::Idle,
 			next_state_time: 0.,
 			attack_range: 96.,
 			target: None,
+			leash: leash,
 		}
 	}
 
-	pub fn new_melee() -> Self
+	pub fn new_melee(leash: Point3<f32>) -> Self
 	{
 		Self {
 			state: AIState::Idle,
 			next_state_time: 0.,
 			attack_range: 24.,
 			target: None,
+			leash: leash,
 		}
 	}
 }
@@ -286,6 +331,8 @@ pub struct StatValues
 	pub chance_to_ignite: f32,
 	pub chance_to_freeze: f32,
 	pub chance_to_shock: f32,
+
+	pub multishot: bool,
 }
 
 impl Default for StatValues
@@ -326,6 +373,8 @@ impl Default for StatValues
 			chance_to_ignite: 0.,
 			chance_to_freeze: 0.,
 			chance_to_shock: 0.,
+
+			multishot: false,
 		}
 	}
 }
@@ -341,7 +390,7 @@ impl StatValues
 			team: Team::Player,
 
 			max_life: 100.,
-			life_regen: 1.,
+			life_regen: 5.,
 			max_mana: 100.,
 			mana_regen: 5.,
 
@@ -362,27 +411,28 @@ impl StatValues
 		}
 	}
 
-	pub fn new_enemy() -> Self
+	pub fn new_enemy(level: i32, rarity: Rarity) -> Self
 	{
+		let f = 1.1_f32.powf((level - 1) as f32);
+		let f = match rarity
+		{
+			Rarity::Normal => f,
+			Rarity::Magic => 1.5 * f,
+			Rarity::Rare => 3. * f,
+		};
+
 		Self {
 			speed: 64.,
 			acceleration: 1024.,
 			skill_duration: 1.,
-			max_life: 150.,
+			max_life: (50. + 25. * level as f32) * f,
 			mana_regen: 100.,
 			max_mana: 100.,
 			cast_speed: 1.,
-			physical_damage: 4.,
 			critical_chance: 0.05,
 			critical_multiplier: 1.5,
 
-			cold_damage: 10.,
-			fire_damage: 4.,
-			lightning_damage: 4.,
-
-			chance_to_ignite: 0.5,
-			chance_to_freeze: 0.5,
-			chance_to_shock: 0.5,
+			physical_damage: (3. + 2. * level as f32) * f,
 
 			area_of_effect: 1.,
 			..Self::default()
@@ -470,8 +520,10 @@ impl Stats
 		}
 	}
 
-	pub fn reset(&mut self, state: &mut game_state::GameState, inventory: Option<&Inventory>)
+	pub fn reset(&mut self, time: f64, penalty_level: i32, inventory: Option<&Inventory>)
 	{
+		let penalty = (penalty_level / 5) as f32;
+
 		self.values = self.base_values;
 		if let Some(inventory) = inventory
 		{
@@ -554,12 +606,17 @@ impl Stats
 			self.values.chance_to_shock = (self.base_values.chance_to_shock + adds.chance_to_shock)
 				* (1. + increases.chance_to_shock);
 
+			self.values.multishot = adds.multishot;
+
 			self.values.critical_chance = utils::min(1., self.values.critical_chance);
 
 			self.values.physical_resistance = utils::min(0.75, self.values.physical_resistance);
-			self.values.cold_resistance = utils::min(0.75, self.values.cold_resistance);
-			self.values.fire_resistance = utils::min(0.75, self.values.fire_resistance);
-			self.values.lightning_resistance = utils::min(0.75, self.values.lightning_resistance);
+			self.values.cold_resistance =
+				utils::clamp(self.values.cold_resistance - penalty * 0.1, -1., 0.75);
+			self.values.fire_resistance =
+				utils::clamp(self.values.fire_resistance - penalty * 0.1, -1., 0.75);
+			self.values.lightning_resistance =
+				utils::clamp(self.values.lightning_resistance - penalty * 0.1, -1., 0.75);
 
 			self.values.chance_to_shock = utils::min(1., self.values.chance_to_shock);
 			self.values.chance_to_ignite = utils::min(1., self.values.chance_to_ignite);
@@ -584,7 +641,7 @@ impl Stats
 			self.values.team = Team::Neutral;
 			self.life = 1.;
 		}
-		if self.freeze_time > state.time()
+		if self.freeze_time > time
 		{
 			self.values.cast_speed = 0.;
 			self.values.acceleration = 0.;
@@ -731,7 +788,7 @@ pub enum AttackKind
 {
 	BladeBlade,
 	Slam,
-	Fireball,
+	Fireball(Rarity),
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -786,11 +843,11 @@ impl PlaceToDie
 	}
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum Effect
 {
 	Die,
-	SpawnFireHit,
+	SpawnExplosion(String),
 	DoDamage(StatValues, Team),
 	SpawnCorpse,
 	SpawnSoul(hecs::Entity),
@@ -950,6 +1007,8 @@ pub enum ItemPrefix
 	ManaRegen = 11,
 	AreaOfEffect = 12,
 	CastSpeed = 13,
+	MoveSpeed = 14,
+	MultiShot = 15,
 }
 
 impl ItemPrefix
@@ -972,6 +1031,8 @@ impl ItemPrefix
 			ItemPrefix::ManaRegen => "Meditating",
 			ItemPrefix::AreaOfEffect => "Engorged",
 			ItemPrefix::CastSpeed => "Animated",
+			ItemPrefix::MoveSpeed => "Fast",
+			ItemPrefix::MultiShot => "MultiShot",
 		}
 	}
 
@@ -994,6 +1055,8 @@ impl ItemPrefix
 			ItemPrefix::ManaRegen => (2., 1.),
 			ItemPrefix::AreaOfEffect => (0.01, 0.01),
 			ItemPrefix::CastSpeed => (0.05, 0.01),
+			ItemPrefix::MoveSpeed => (0.01, 0.01),
+			ItemPrefix::MultiShot => (0.1, 0.01),
 		};
 		let start = delta * tier;
 		let end = delta * (tier + 1.);
@@ -1035,6 +1098,8 @@ impl ItemPrefix
 			ItemPrefix::ManaRegen => "Mana Regen",
 			ItemPrefix::AreaOfEffect => "Area of Effect",
 			ItemPrefix::CastSpeed => "Cast Speed",
+			ItemPrefix::MoveSpeed => "Move Speed",
+			ItemPrefix::MultiShot => "Multiple Shots",
 		};
 		format!(
 			"{sign}{value}{percent} {suffix}",
@@ -1076,15 +1141,15 @@ impl ItemPrefix
 			}
 			ItemPrefix::ChanceToFreeze =>
 			{
-				increases.chance_to_freeze += value;
+				adds.chance_to_freeze += value;
 			}
 			ItemPrefix::ChanceToIgnite =>
 			{
-				increases.chance_to_ignite += value;
+				adds.chance_to_ignite += value;
 			}
 			ItemPrefix::ChanceToShock =>
 			{
-				increases.chance_to_shock += value;
+				adds.chance_to_shock += value;
 			}
 			ItemPrefix::Mana =>
 			{
@@ -1101,6 +1166,14 @@ impl ItemPrefix
 			ItemPrefix::CastSpeed =>
 			{
 				increases.cast_speed += value;
+			}
+			ItemPrefix::MoveSpeed =>
+			{
+				increases.speed += value;
+			}
+			ItemPrefix::MultiShot =>
+			{
+				adds.multishot = true;
 			}
 		}
 	}
@@ -1122,6 +1195,7 @@ pub enum ItemSuffix
 	IncreasedLightningDamage = 9,
 	LifeLeech = 10,
 	ManaLeech = 11,
+	Duration = 12,
 }
 
 impl ItemSuffix
@@ -1142,6 +1216,7 @@ impl ItemSuffix
 			ItemSuffix::IncreasedLightningDamage => "of the Turbine",
 			ItemSuffix::LifeLeech => "of the Vampire",
 			ItemSuffix::ManaLeech => "of the Wight",
+			ItemSuffix::Duration => "of Time",
 		}
 	}
 
@@ -1162,6 +1237,7 @@ impl ItemSuffix
 			ItemSuffix::IncreasedLightningDamage => (0.10, 0.01),
 			ItemSuffix::LifeLeech => (0.01, 0.01),
 			ItemSuffix::ManaLeech => (0.01, 0.01),
+			ItemSuffix::Duration => (0.02, 0.01),
 		};
 		let start = delta * tier;
 		let end = delta * (tier + 1.);
@@ -1194,6 +1270,7 @@ impl ItemSuffix
 			ItemSuffix::IncreasedLightningDamage => "Lightning Damage",
 			ItemSuffix::LifeLeech => "Life Leech",
 			ItemSuffix::ManaLeech => "Mana Leech",
+			ItemSuffix::Duration => "Skill Duration",
 		};
 		format!(
 			"{sign}{value}{percent} {suffix}",
@@ -1254,13 +1331,18 @@ impl ItemSuffix
 			{
 				adds.mana_leech += value;
 			}
+			ItemSuffix::Duration =>
+			{
+				increases.skill_duration += value;
+			}
 		}
 	}
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Rarity
 {
+	Normal,
 	Magic,
 	Rare,
 }
@@ -1378,6 +1460,7 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 		(ItemSuffix::IncreasedLightningDamage, 500),
 		(ItemSuffix::LifeLeech, 200),
 		(ItemSuffix::ManaLeech, 50),
+		(ItemSuffix::Duration, 50),
 	];
 
 	let green_suffix_weights = [
@@ -1393,6 +1476,7 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 		(ItemSuffix::IncreasedLightningDamage, 1000),
 		(ItemSuffix::LifeLeech, 50),
 		(ItemSuffix::ManaLeech, 50),
+		(ItemSuffix::Duration, 500),
 	];
 
 	let blue_suffix_weights = [
@@ -1408,6 +1492,7 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 		(ItemSuffix::IncreasedLightningDamage, 500),
 		(ItemSuffix::LifeLeech, 50),
 		(ItemSuffix::ManaLeech, 200),
+		(ItemSuffix::Duration, 50),
 	];
 
 	let prefix_weights = [
@@ -1421,8 +1506,8 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 		blue_suffix_weights,
 	][kind as usize];
 
-	let num_affixes = [1, 3][rarity as usize];
-	let min_affixes = [1, 3][rarity as usize];
+	let num_affixes = [1, 3][rarity as usize - 1];
+	let min_affixes = [1, 3][rarity as usize - 1];
 	let mut num_prefixes;
 	let mut num_suffixes;
 	loop
@@ -1464,6 +1549,7 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 
 	let name = match rarity
 	{
+		Rarity::Normal => unreachable!(),
 		Rarity::Magic =>
 		{
 			make_magic_name(kind, prefixes.first().copied(), suffixes.first().copied())
@@ -1482,7 +1568,7 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 		prefixes: prefixes,
 		suffixes: suffixes,
 	};
-	dbg!(&item);
+	//dbg!(&item);
 	item
 }
 
