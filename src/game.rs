@@ -63,6 +63,7 @@ impl Game
 		state.cache_sprite("data/cold_enchanted.cfg")?;
 		state.cache_sprite("data/lightning_enchanted.cfg")?;
 		state.cache_sprite("data/fire_enchanted.cfg")?;
+		state.cache_sprite("data/platform.cfg")?;
 
 		Ok(Self {
 			map: Map::new(state)?,
@@ -1056,6 +1057,25 @@ fn damage_sprites(values: &comps::StatValues) -> DamageSprites
 	}
 }
 
+fn spawn_platform(
+	waypoints: Vec<(Point2<f32>, f64)>, world: &mut hecs::World,
+) -> Result<hecs::Entity>
+{
+	let entity = world.spawn((
+		comps::Appearance::new_with_bias("data/platform.cfg", -48),
+		comps::Position::new(Point3::new(waypoints[0].0.x, waypoints[0].0.y, 0.)),
+		comps::Velocity::new(Vector3::zeros()),
+		comps::Solid {
+			size: 48.,
+			mass: std::f32::INFINITY,
+			kind: comps::CollisionKind::Platform,
+		},
+		comps::Waypoints::new(waypoints),
+		comps::Stats::new(comps::StatValues::new_platform()),
+	));
+	Ok(entity)
+}
+
 fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
 {
 	let inventory = comps::Inventory::new();
@@ -1063,9 +1083,7 @@ fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entit
 		comps::Appearance::new("data/player.cfg"),
 		comps::StatusAppearance::new(),
 		comps::Position::new(pos),
-		comps::Velocity {
-			pos: Vector3::zeros(),
-		},
+		comps::Velocity::new(Vector3::zeros()),
 		comps::Acceleration {
 			pos: Vector3::zeros(),
 		},
@@ -1323,9 +1341,7 @@ fn spawn_enemy(
 		appearance,
 		comps::StatusAppearance::new_with_effects(effects),
 		comps::Position::new(pos),
-		comps::Velocity {
-			pos: Vector3::zeros(),
-		},
+		comps::Velocity::new(Vector3::zeros()),
 		comps::Acceleration {
 			pos: Vector3::zeros(),
 		},
@@ -1463,7 +1479,7 @@ fn spawn_item(
 	let entity = world.spawn((
 		appearance,
 		comps::Position::new(pos),
-		comps::Velocity { pos: vel_pos },
+		comps::Velocity::new(vel_pos),
 		comps::Acceleration {
 			pos: Vector3::zeros(),
 		},
@@ -1491,6 +1507,7 @@ fn spawn_corpse(
 	{
 		stats.dead = true;
 		stats.life = 1.;
+		stats.ignite_instances.clear();
 		stats
 	}
 	else
@@ -1500,7 +1517,7 @@ fn spawn_corpse(
 	let entity = world.spawn((
 		appearance,
 		comps::Position::new(pos),
-		comps::Velocity { pos: vel_pos },
+		comps::Velocity::new(vel_pos),
 		comps::Acceleration {
 			pos: Vector3::zeros(),
 		},
@@ -1531,7 +1548,7 @@ fn spawn_fireball(
 	let entity = world.spawn((
 		comps::Appearance::new(sprites.arrow),
 		comps::Position::new(pos),
-		comps::Velocity { pos: velocity_pos },
+		comps::Velocity::new(velocity_pos),
 		comps::Acceleration {
 			pos: acceleration_pos,
 		},
@@ -1564,9 +1581,7 @@ fn spawn_soul(
 	let entity = world.spawn((
 		comps::Appearance::new("data/soul.cfg"),
 		comps::Position::new(pos),
-		comps::Velocity {
-			pos: Vector3::zeros(),
-		},
+		comps::Velocity::new(Vector3::zeros()),
 		comps::Acceleration {
 			pos: 256. * (target - pos).normalize(),
 		},
@@ -1586,9 +1601,7 @@ fn spawn_power_sphere(
 	let entity = world.spawn((
 		comps::Appearance::new("data/power_sphere.cfg"),
 		comps::Position::new(pos),
-		comps::Velocity {
-			pos: Vector3::zeros(),
-		},
+		comps::Velocity::new(Vector3::zeros()),
 		comps::Acceleration {
 			pos: 256. * (target - pos).normalize(),
 		},
@@ -1631,6 +1644,7 @@ struct GridInner
 {
 	id: hecs::Entity,
 	pos: Point3<f32>,
+	solid: comps::Solid,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -1652,42 +1666,180 @@ impl TileKind
 	}
 }
 
-struct MapChunk
+fn get_float_property(property: &str, obj: &tiled::Object) -> Result<Option<f32>>
+{
+	if let Some(p) = obj.properties.get(property)
+	{
+		match p
+		{
+			tiled::PropertyValue::FloatValue(v) => Ok(Some(*v)),
+			other => Err(format!(
+				"Invalid value for '{}' in object {:?}: {:?}",
+				property, obj, other
+			)
+			.into()),
+		}
+	}
+	else
+	{
+		Ok(None)
+	}
+}
+
+fn get_object_property(property: &str, obj: &tiled::Object) -> Result<Option<u32>>
+{
+	if let Some(p) = obj.properties.get(property)
+	{
+		match p
+		{
+			tiled::PropertyValue::ObjectValue(v) => Ok(Some(*v)),
+			other => Err(format!(
+				"Invalid value for '{}' in object {:?}: {:?}",
+				property, obj, other
+			)
+			.into()),
+		}
+	}
+	else
+	{
+		Ok(None)
+	}
+}
+
+fn get_object_center(obj: &tiled::Object) -> Result<Point2<f32>>
+{
+	match obj.shape
+	{
+		tiled::ObjectShape::Ellipse { width, height } => Ok(Point2::new(
+			obj.x as f32 + width / 2.,
+			obj.y as f32 + height / 2.,
+		)),
+		tiled::ObjectShape::Rect { width, height } => Ok(Point2::new(
+			obj.x as f32 + width / 2.,
+			obj.y as f32 + height / 2.,
+		)),
+		tiled::ObjectShape::Point(x, y) => Ok(Point2::new(x, y)),
+		_ => Err(format!("Invalid shape {:?} for object {:?}", obj.shape, obj.id()).into()),
+	}
+}
+
+struct Tiles
 {
 	tiles: Vec<i32>,
 	width: i32,
 	height: i32,
+	start: Point2<f32>,
+	platforms: Vec<Vec<(Point2<f32>, f64)>>,
+	crystals: Vec<Point2<f32>>,
 }
 
-impl MapChunk
+impl Tiles
 {
 	fn new(filename: &str) -> Result<Self>
 	{
 		let map = tiled::Loader::new().load_tmx_map(&Path::new(&filename))?;
-		let layer_tiles = match map.get_layer(0).unwrap().layer_type()
+
+		let mut tiles = vec![];
+		let mut width = 0;
+		let mut height = 0;
+
+		let mut waypoints = HashMap::new();
+		let mut platforms = vec![];
+		let mut crystals = vec![];
+		let mut start = None;
+
+		for layer in map.layers()
 		{
-			tiled::LayerType::Tiles(layer_tiles) => layer_tiles,
-			_ => return Err("Layer 0 must be the tile layer!".to_string().into()),
-		};
-
-		let height = layer_tiles.height().unwrap() as usize;
-		let width = layer_tiles.width().unwrap() as usize;
-
-		let mut tiles = Vec::with_capacity(width * height);
-
-		for y in 0..height
-		{
-			for x in 0..width
+			match layer.layer_type()
 			{
-				let id = layer_tiles.get_tile(x as i32, y as i32).unwrap().id();
-				tiles.push(id as i32);
+				tiled::LayerType::Objects(layer) =>
+				{
+					for object in layer.objects()
+					{
+						match object.user_type.as_str()
+						{
+							"Start" =>
+							{
+								start = Some(get_object_center(&object)?);
+							}
+							"Crystal" =>
+							{
+								crystals.push(get_object_center(&object)?);
+							}
+							"Waypoint" =>
+							{
+								waypoints.insert(
+									object.id(),
+									(
+										get_object_center(&object)?,
+										get_float_property("wait_time", &object)?.unwrap_or(0.)
+											as f64,
+									),
+								);
+							}
+							"Platform" =>
+							{
+								let mut waypoint_ids = vec![];
+								for i in 0..4
+								{
+									if let Some(waypoint_id) =
+										get_object_property(&format!("waypoint_{i}"), &object)?
+									{
+										waypoint_ids.push(waypoint_id);
+									}
+									else
+									{
+										break;
+									}
+								}
+								platforms.push(waypoint_ids);
+							}
+							_ => (),
+						}
+					}
+				}
+				tiled::LayerType::Tiles(layer) =>
+				{
+					height = layer.height().unwrap() as usize;
+					width = layer.width().unwrap() as usize;
+					tiles = Vec::with_capacity(width * height);
+
+					for y in 0..height
+					{
+						for x in 0..width
+						{
+							let id = layer.get_tile(x as i32, y as i32).unwrap().id();
+							tiles.push(id as i32);
+						}
+					}
+				}
+				_ => (),
 			}
+		}
+
+		if start.is_none()
+		{
+			return Err("No start in map!".to_string().into());
+		}
+
+		let mut resolved_platforms = vec![];
+		for waypoint_ids in platforms
+		{
+			let mut resolved_waypoints = vec![];
+			for waypoint_id in waypoint_ids
+			{
+				resolved_waypoints.push(waypoints[&waypoint_id]);
+			}
+			resolved_platforms.push(resolved_waypoints);
 		}
 
 		Ok(Self {
 			tiles: tiles,
 			width: width as i32,
 			height: height as i32,
+			start: start.unwrap(),
+			platforms: resolved_platforms,
+			crystals: crystals,
 		})
 	}
 
@@ -1725,8 +1877,8 @@ impl MapChunk
 
 	fn get_tile_kind(&self, pos: Point2<f32>) -> TileKind
 	{
-		let tile_x = ((pos.x + TILE_SIZE / 2.) / TILE_SIZE).floor() as i32;
-		let tile_y = ((pos.y + TILE_SIZE / 2.) / TILE_SIZE).floor() as i32;
+		let tile_x = ((pos.x) / TILE_SIZE).floor() as i32;
+		let tile_y = ((pos.y) / TILE_SIZE).floor() as i32;
 		if tile_x < 0 || tile_x >= self.width || tile_y < 0 || tile_y >= self.height
 		{
 			return TileKind::Empty;
@@ -1738,8 +1890,8 @@ impl MapChunk
 		&self, pos: Point2<f32>, size: f32, avoid_kind: TileKind,
 	) -> Option<Vector2<f32>>
 	{
-		let tile_x = ((pos.x + TILE_SIZE / 2.) / TILE_SIZE) as i32;
-		let tile_y = ((pos.y + TILE_SIZE / 2.) / TILE_SIZE) as i32;
+		let tile_x = ((pos.x) / TILE_SIZE) as i32;
+		let tile_y = ((pos.y) / TILE_SIZE) as i32;
 
 		let mut res = Vector2::zeros();
 		// TODO: This -1/1 isn't really right (???)
@@ -1757,8 +1909,8 @@ impl MapChunk
 					continue;
 				}
 
-				let cx = map_x as f32 * TILE_SIZE - TILE_SIZE / 2.;
-				let cy = map_y as f32 * TILE_SIZE - TILE_SIZE / 2.;
+				let cx = map_x as f32 * TILE_SIZE;
+				let cy = map_y as f32 * TILE_SIZE;
 
 				let vs = [
 					Point2::new(cx, cy),
@@ -1804,7 +1956,7 @@ struct Map
 {
 	world: hecs::World,
 	player: hecs::Entity,
-	chunks: Vec<MapChunk>,
+	tiles: Tiles,
 	camera_pos: comps::Position,
 	camera_lookahead: Vector2<f32>,
 	show_depth: bool,
@@ -1819,65 +1971,39 @@ impl Map
 	{
 		let mut world = hecs::World::new();
 
-		let spawn_pos = Point3::new(0., 0., 0.);
+		let tiles = Tiles::new("data/test.tmx")?;
 
+		let spawn_pos = Point3::new(tiles.start.x, tiles.start.y, 0.);
 		let player = spawn_player(spawn_pos, &mut world)?;
 
-		let level = 1;
-
-		for i in 0..5
+		for waypoints in &tiles.platforms
 		{
-			for j in 0..5
-			{
-				spawn_item(
-					Point3::new(32. + 16. * i as f32, 16. * j as f32, 0.),
-					Vector3::new(0., 0., 128.),
-					comps::generate_item(
-						[
-							comps::ItemKind::Red,
-							comps::ItemKind::Blue,
-							comps::ItemKind::Green,
-						][i % 3],
-						7,
-						level,
-						&mut thread_rng(),
-					),
-					&mut world,
-				)?;
-			}
+			spawn_platform(waypoints.clone(), &mut world)?;
 		}
 
+		let level = 1;
 		let mut rng = thread_rng();
-		let crystal = spawn_crystal(
-			Point3::new(300., 300., 0.),
-			comps::ItemKind::Red,
-			&mut world,
-		)?;
-		spawn_from_crystal(crystal, level, &mut world, &mut rng)?;
-		let crystal = spawn_crystal(
-			Point3::new(200., 200., 0.),
-			comps::ItemKind::Green,
-			&mut world,
-		)?;
-		spawn_from_crystal(crystal, level, &mut world, &mut rng)?;
-		let crystal = spawn_crystal(
-			Point3::new(300., 200., 0.),
-			comps::ItemKind::Blue,
-			&mut world,
-		)?;
-		spawn_from_crystal(crystal, level, &mut world, &mut rng)?;
 
-		let crystal = spawn_crystal(
-			Point3::new(300., 400., 0.),
-			comps::ItemKind::Blue,
-			&mut world,
-		)?;
-		spawn_from_crystal(crystal, 1, &mut world, &mut rng)?;
+		for crystal in &tiles.crystals
+		{
+			let crystal = spawn_crystal(
+				Point3::new(crystal.x, crystal.y, 0.),
+				*[
+					comps::ItemKind::Red,
+					comps::ItemKind::Blue,
+					comps::ItemKind::Green,
+				]
+				.choose(&mut rng)
+				.unwrap(),
+				&mut world,
+			)?;
+			spawn_from_crystal(crystal, level, &mut world, &mut rng)?;
+		}
 
 		Ok(Self {
 			world: world,
 			player: player,
-			chunks: vec![MapChunk::new("data/test.tmx")?],
+			tiles: tiles,
 			camera_pos: comps::Position::new(spawn_pos),
 			camera_lookahead: Vector2::zeros(),
 			show_depth: false,
@@ -2244,7 +2370,7 @@ impl Map
 				appearance
 					.animation_state
 					.set_new_animation(format!("Move{}", vec_to_dir_name(acceleration.pos.xy())));
-				appearance.speed = velocity.pos.norm() / 196.;
+				appearance.speed = (velocity.pos - velocity.ground_pos).norm() / 196.;
 			}
 			else
 			{
@@ -2548,11 +2674,39 @@ impl Map
 			.iter()
 		{
 			if position.pos.z <= 0.
-				&& self.chunks[0].get_tile_kind(position.pos.xy()) == TileKind::Floor
+				&& self.tiles.get_tile_kind(position.pos.xy()) == TileKind::Floor
 			{
 				continue;
 			}
 			acceleration.pos.z = -affected_by_gravity.factor * 512.;
+		}
+
+		// Waypoints
+		for (_, (position, velocity, waypoints)) in self
+			.world
+			.query::<(
+				&mut comps::Position,
+				&mut comps::Velocity,
+				&mut comps::Waypoints,
+			)>()
+			.iter()
+		{
+			let (cur_waypoint_pos, time_to_linger) = waypoints.waypoints[waypoints.cur_idx];
+			let diff = cur_waypoint_pos - position.pos.xy();
+			if diff.norm() < velocity.pos.xy().norm() * DT || diff.norm() == 0.
+			{
+				position.pos.set_xy(cur_waypoint_pos);
+				velocity.pos = Vector3::zeros();
+				waypoints.cur_idx = (waypoints.cur_idx + 1) % waypoints.waypoints.len();
+				waypoints.time_to_move = state.time() + time_to_linger;
+			}
+			if state.time() > waypoints.time_to_move
+			{
+				let (cur_waypoint_pos, _) = waypoints.waypoints[waypoints.cur_idx];
+				let diff = cur_waypoint_pos - position.pos.xy();
+				let diff = 128. * diff.normalize();
+				velocity.pos = Vector3::new(diff.x, diff.y, 0.);
+			}
 		}
 
 		// Velocity.
@@ -2567,29 +2721,31 @@ impl Map
 		{
 			if position.pos.z > 0.
 			{
+				velocity.ground_pos = Vector3::zeros();
 				continue;
 			}
 			let decel = 1024.;
-			if velocity.pos.x.abs() > 0. && acceleration.pos.x == 0.
+			let relative_velocity = velocity.pos - velocity.ground_pos;
+			if relative_velocity.x.abs() > 0. && acceleration.pos.x == 0.
 			{
-				if velocity.pos.x.abs() <= decel * DT
+				if relative_velocity.x.abs() <= decel * DT
 				{
-					velocity.pos.x = 0.
+					velocity.pos.x = velocity.ground_pos.x;
 				}
 				else
 				{
-					acceleration.pos.x = -velocity.pos.x.signum() * decel;
+					acceleration.pos.x = -relative_velocity.x.signum() * decel;
 				}
 			}
-			if velocity.pos.y.abs() > 0. && acceleration.pos.y == 0.
+			if relative_velocity.y.abs() > 0. && acceleration.pos.y == 0.
 			{
-				if velocity.pos.y.abs() <= decel * DT
+				if relative_velocity.y.abs() <= decel * DT
 				{
-					velocity.pos.y = 0.
+					velocity.pos.y = velocity.ground_pos.y;
 				}
 				else
 				{
-					acceleration.pos.y = -velocity.pos.y.signum() * decel;
+					acceleration.pos.y = -relative_velocity.y.signum() * decel;
 				}
 			}
 		}
@@ -2603,12 +2759,16 @@ impl Map
 			velocity.pos = velocity.pos + DT * acceleration.pos;
 			if acceleration.pos.xy().norm() > 0.
 			{
-				let projected_speed = velocity.pos.xy().dot(&acceleration.pos.xy().normalize());
+				let mut relative_velocity = velocity.pos - velocity.ground_pos;
+				let projected_speed = relative_velocity
+					.xy()
+					.dot(&acceleration.pos.xy().normalize());
 				if projected_speed > stats.values.speed
 				{
-					velocity
-						.pos
-						.set_xy(velocity.pos.xy() * stats.values.speed / projected_speed);
+					relative_velocity
+						.set_xy(relative_velocity.xy() * stats.values.speed / projected_speed);
+
+					velocity.pos = velocity.ground_pos + relative_velocity;
 				}
 			}
 		}
@@ -2625,9 +2785,9 @@ impl Map
 			{
 				position.pos.set_xy(utils::round_point(position.pos.xy()));
 			}
-			if velocity.pos.xy().norm() > 0.
+			if (velocity.pos - velocity.ground_pos).xy().norm() > 0.
 			{
-				position.dir = velocity.pos.y.atan2(velocity.pos.x);
+				position.dir = (velocity.pos - velocity.ground_pos).y.atan2(velocity.pos.x);
 			}
 		}
 
@@ -2647,8 +2807,8 @@ impl Map
 
 		// Collision detection
 		let mut grid = spatial_grid::SpatialGrid::new(
-			self.chunks[0].width as usize,
-			self.chunks[0].height as usize,
+			self.tiles.width as usize,
+			self.tiles.height as usize,
 			TILE_SIZE,
 			TILE_SIZE,
 		);
@@ -2665,6 +2825,7 @@ impl Map
 				GridInner {
 					pos: position.pos,
 					id: id,
+					solid: *solid,
 				},
 			));
 		}
@@ -2705,24 +2866,67 @@ impl Map
 					continue;
 				}
 
+				let mut actually_collided = true;
 				if solid1.kind.interacts() && solid2.kind.interacts()
 				{
-					let diff = 0.9 * diff * (solid1.size + solid2.size - diff_norm) / diff_norm;
-
-					let f1 = 1. - solid1.mass / (solid2.mass + solid1.mass);
-					let f2 = 1. - solid2.mass / (solid2.mass + solid1.mass);
-					if f32::is_finite(f1)
+					if (solid1.kind == comps::CollisionKind::Platform
+						|| solid2.kind == comps::CollisionKind::Platform)
+						&& ((pos1.z >= 0. && pos2.z >= 0.)
+							|| diff_norm < (utils::max(solid1.size, solid2.size)))
 					{
-						let mut position = self.world.get::<&mut comps::Position>(id1)?;
-						position.pos.add_xy(-diff * f1);
+						actually_collided = false;
+						if solid1.kind != comps::CollisionKind::Platform
+						{
+							let mut position = self.world.get::<&mut comps::Position>(id1)?;
+							let platform_velocity =
+								self.world.get::<&comps::Velocity>(id2)?.pos.clone();
+							if position.pos.z < 0.
+							{
+								if let Ok(mut velocity) =
+									self.world.get::<&mut comps::Velocity>(id1)
+								{
+									velocity.pos.z = 0.;
+									velocity.ground_pos = platform_velocity;
+								}
+								position.pos.z = 0.
+							}
+						}
+						if solid2.kind != comps::CollisionKind::Platform
+						{
+							let mut position = self.world.get::<&mut comps::Position>(id2)?;
+							let platform_velocity =
+								self.world.get::<&comps::Velocity>(id1)?.pos.clone();
+							if position.pos.z < 0.
+							{
+								if let Ok(mut velocity) =
+									self.world.get::<&mut comps::Velocity>(id2)
+								{
+									velocity.pos.z = 0.;
+									velocity.ground_pos = platform_velocity;
+								}
+								position.pos.z = 0.
+							}
+						}
 					}
-					if f32::is_finite(f2)
+					else
 					{
-						let mut position = self.world.get::<&mut comps::Position>(id2)?;
-						position.pos.add_xy(diff * f2);
+						let diff = 0.9 * diff * (solid1.size + solid2.size - diff_norm) / diff_norm;
+
+						let f1 = 1. - solid1.mass / (solid2.mass + solid1.mass);
+						let f2 = 1. - solid2.mass / (solid2.mass + solid1.mass);
+						if f32::is_finite(f1)
+						{
+							let mut position = self.world.get::<&mut comps::Position>(id1)?;
+							position.pos.add_xy(-diff * f1);
+						}
+						if f32::is_finite(f2)
+						{
+							let mut position = self.world.get::<&mut comps::Position>(id2)?;
+							position.pos.add_xy(diff * f2);
+						}
 					}
 				}
-				if pass == 0
+				if pass == 0 && actually_collided
 				{
 					for (id, other_id) in [(id1, Some(id2)), (id2, Some(id1))]
 					{
@@ -2734,6 +2938,7 @@ impl Map
 					}
 				}
 			}
+
 			// Floor collision.
 			for (id, (position, velocity, solid)) in self
 				.world
@@ -2742,26 +2947,32 @@ impl Map
 			{
 				if solid.kind.avoid_holes()
 				{
-					let push_dir = self.chunks[0].get_escape_dir(
-						position.pos.xy(),
-						solid.size,
-						TileKind::Empty,
-					);
+					let push_dir =
+						self.tiles
+							.get_escape_dir(position.pos.xy(), solid.size, TileKind::Empty);
 					if let Some(push_dir) = push_dir
 					{
 						position.pos.add_xy(push_dir);
 					}
 				}
-				if position.pos.z < 0.
+				if position.pos.z == 0.
 				{
-					if self.chunks[0].get_tile_kind(position.pos.xy()) == TileKind::Floor
+					if self.tiles.get_tile_kind(position.pos.xy()) == TileKind::Floor
+					{
+						velocity.ground_pos = Vector3::zeros();
+					}
+				}
+				else if position.pos.z < 0.
+				{
+					if self.tiles.get_tile_kind(position.pos.xy()) == TileKind::Floor
 					{
 						position.pos.z = 0.;
 						velocity.pos.z = 0.;
+						velocity.ground_pos = Vector3::zeros();
 					}
 					else
 					{
-						let push_dir = self.chunks[0].get_escape_dir(
+						let push_dir = self.tiles.get_escape_dir(
 							position.pos.xy(),
 							solid.size,
 							TileKind::Floor,
@@ -3143,7 +3354,7 @@ impl Map
 
 	fn draw(&mut self, state: &game_state::GameState) -> Result<()>
 	{
-		state.core.clear_to_color(Color::from_rgb_f(0.3, 0.3, 0.3));
+		state.core.clear_to_color(Color::from_rgb_f(0.0, 0.0, 0.1));
 		state.core.clear_depth_buffer(-1.);
 		state.core.set_depth_test(Some(DepthFunction::Greater));
 		let ortho_mat = Matrix4::new_orthographic(
@@ -3177,15 +3388,12 @@ impl Map
 			.set_shader_sampler("palette", &state.palettes.palette_bitmap, 2)
 			.ok();
 
-		for chunk in self.chunks.iter_mut()
-		{
-			chunk.draw(
-				Point2::new(camera_shift.x, camera_shift.y),
-				&mut scene,
-				-0.7 * TILE_SIZE - self.camera_pos.pos.y,
-				state,
-			)?;
-		}
+		self.tiles.draw(
+			Point2::new(camera_shift.x, camera_shift.y),
+			&mut scene,
+			-0.2 * TILE_SIZE - self.camera_pos.pos.y,
+			state,
+		)?;
 		for (_, (appearance, position)) in self
 			.world
 			.query_mut::<(&comps::Appearance, &comps::Position)>()
@@ -3283,15 +3491,60 @@ impl Map
 			);
 		}
 
+		let mut grid = spatial_grid::SpatialGrid::new(
+			self.tiles.width as usize,
+			self.tiles.height as usize,
+			TILE_SIZE,
+			TILE_SIZE,
+		);
+
+		for (id, (position, solid)) in self.world.query_mut::<(&comps::Position, &comps::Solid)>()
+		{
+			if solid.kind == comps::CollisionKind::Platform
+			{
+				let margin = 8.;
+				let r = solid.size + margin;
+				let x = position.pos.x;
+				let y = position.pos.y;
+				grid.push(spatial_grid::entry(
+					Point2::new(x - r, y - r),
+					Point2::new(x + r, y + r),
+					GridInner {
+						pos: position.pos,
+						id: id,
+						solid: *solid,
+					},
+				));
+			}
+		}
+
 		// Shadows.
 		for (_, (position, _)) in self
 			.world
 			.query_mut::<(&comps::Position, &comps::CastsShadow)>()
 		{
-			if self.chunks[0].get_tile_kind(position.pos.xy()) != TileKind::Floor
+			if position.pos.z < 0.
 			{
 				continue;
 			}
+			if self.tiles.get_tile_kind(position.pos.xy()) != TileKind::Floor
+			{
+				let diff = Vector2::new(1., 1.);
+				let mut over_platform = false;
+				for entry in
+					grid.query_rect(position.pos.xy() - diff, position.pos.xy() + diff, |_| true)
+				{
+					if (position.pos.xy() - entry.inner.pos.xy()).norm() < entry.inner.solid.size
+					{
+						over_platform = true;
+					}
+				}
+				if !over_platform
+				{
+					continue;
+				}
+			}
+
 			let sprite = state.get_sprite("data/shadow.cfg")?;
 			let palette_index = state
 				.palettes

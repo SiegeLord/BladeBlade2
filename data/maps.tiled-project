@@ -1,0 +1,119 @@
+{
+    "automappingRulesFile": "",
+    "commands": [
+    ],
+    "compatibilityVersion": 1100,
+    "extensionsPath": "extensions",
+    "folders": [
+        "."
+    ],
+    "properties": [
+    ],
+    "propertyTypes": [
+        {
+            "color": "#ff00ff00",
+            "drawFill": true,
+            "id": 1,
+            "members": [
+            ],
+            "name": "Start",
+            "type": "class",
+            "useAs": [
+                "property",
+                "map",
+                "layer",
+                "object",
+                "tile",
+                "tileset",
+                "wangcolor",
+                "wangset",
+                "project"
+            ]
+        },
+        {
+            "color": "#ff00ffff",
+            "drawFill": true,
+            "id": 2,
+            "members": [
+            ],
+            "name": "Crystal",
+            "type": "class",
+            "useAs": [
+                "property",
+                "map",
+                "layer",
+                "object",
+                "tile",
+                "tileset",
+                "wangcolor",
+                "wangset",
+                "project"
+            ]
+        },
+        {
+            "color": "#ff5500ff",
+            "drawFill": true,
+            "id": 3,
+            "members": [
+                {
+                    "name": "waypoint_0",
+                    "type": "object",
+                    "value": 0
+                },
+                {
+                    "name": "waypoint_1",
+                    "type": "object",
+                    "value": 0
+                },
+                {
+                    "name": "waypoint_2",
+                    "type": "object",
+                    "value": 0
+                },
+                {
+                    "name": "waypoint_3",
+                    "type": "object",
+                    "value": 0
+                }
+            ],
+            "name": "Platform",
+            "type": "class",
+            "useAs": [
+                "property",
+                "map",
+                "layer",
+                "object",
+                "tile",
+                "tileset",
+                "wangcolor",
+                "wangset",
+                "project"
+            ]
+        },
+        {
+            "color": "#ffffff7f",
+            "drawFill": true,
+            "id": 4,
+            "members": [
+                {
+                    "name": "wait_time",
+                    "type": "float",
+                    "value": 0
+                }
+            ],
+            "name": "Waypoint",
+            "type": "class",
+            "useAs": [
+                "property",
+                "map",
+                "layer",
+                "object",
+                "tile",
+                "tileset",
+                "wangcolor",
+                "wangset",
+                "project"
+            ]
+        }
+    ]
+}

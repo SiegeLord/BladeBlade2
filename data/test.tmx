@@ -1,24 +1,57 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<map version="1.10" tiledversion="1.11.0" orientation="orthogonal" renderorder="right-down" width="16" height="16" tilewidth="32" tileheight="32" infinite="0" nextlayerid="2" nextobjectid="1">
+<map version="1.10" tiledversion="1.11.0" orientation="orthogonal" renderorder="right-down" width="16" height="16" tilewidth="32" tileheight="32" infinite="0" nextlayerid="4" nextobjectid="14">
  <tileset firstgid="1" source="Terrain.tsx"/>
- <layer id="1" name="Tile Layer 1" width="16" height="16">
+ <layer id="3" name="Tile Layer 1" width="16" height="16">
   <data encoding="csv">
-7,3,3,3,8,1,1,1,1,1,1,1,1,1,1,1,
-10,14,13,14,16,8,1,7,3,8,1,1,1,1,1,1,
-1,6,4,6,2,4,1,10,14,16,3,8,1,1,1,1,
-1,6,16,15,2,16,3,3,15,2,2,16,8,1,1,1,
-1,10,5,14,2,2,2,2,2,2,2,13,9,1,1,1,
-1,1,1,6,13,14,2,2,2,2,2,16,8,1,1,1,
-1,7,3,12,9,6,2,2,2,2,2,2,16,8,1,1,
-1,6,13,11,3,15,2,2,2,2,2,2,13,9,1,1,
-1,6,4,6,2,2,2,13,14,2,13,5,9,1,1,1,
-1,6,4,6,13,5,5,11,15,2,16,3,3,3,8,1,
-1,6,16,12,9,1,7,15,2,2,13,5,14,2,4,1,
-1,10,14,4,7,3,15,2,2,2,16,3,12,14,4,1,
-1,1,10,11,15,2,2,2,2,2,2,2,4,10,9,1,
-1,1,1,10,5,5,14,2,2,2,2,13,9,1,1,1,
-1,1,1,1,1,1,6,2,2,13,5,9,1,1,1,1,
-1,1,1,1,1,1,10,5,5,9,1,1,1,1,1,1
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,7,3,8,7,8,7,8,1,7,8,1,7,8,
+1,7,3,15,2,4,10,9,10,9,1,10,9,1,10,9,
+1,6,2,13,5,9,7,8,1,1,1,1,1,1,1,1,
+1,6,2,4,1,1,10,11,8,1,7,3,3,8,1,1,
+1,6,2,16,3,3,3,12,9,1,6,13,14,16,8,1,
+1,6,13,14,13,5,5,9,1,1,6,16,15,2,4,1,
+1,6,16,15,4,1,1,1,1,1,6,2,2,13,9,1,
+1,6,13,14,4,1,1,1,1,1,6,2,2,4,1,1,
+1,6,16,15,4,1,1,1,1,1,6,13,14,16,8,1,
+1,6,2,2,16,8,1,1,1,1,6,16,15,2,4,1,
+1,6,13,5,14,4,1,1,1,1,6,2,2,2,4,1,
+1,6,16,3,15,4,1,1,1,1,6,2,13,14,4,1,
+1,10,5,5,5,9,1,1,1,1,6,13,11,15,4,1,
+1,1,1,1,1,1,1,1,1,1,10,9,10,5,9,1,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
 </data>
  </layer>
+ <objectgroup id="2" name="Object Layer 1">
+  <object id="2" type="Start" x="128" y="64" width="32" height="32">
+   <ellipse/>
+  </object>
+  <object id="6" type="Platform" x="160" y="224" width="96" height="96">
+   <properties>
+    <property name="waypoint_0" type="object" value="7"/>
+    <property name="waypoint_1" type="object" value="8"/>
+   </properties>
+   <ellipse/>
+  </object>
+  <object id="7" type="Waypoint" x="192" y="256" width="32" height="32">
+   <properties>
+    <property name="wait_time" type="float" value="1"/>
+   </properties>
+   <ellipse/>
+  </object>
+  <object id="8" type="Waypoint" x="256" y="256" width="32" height="31.6364">
+   <properties>
+    <property name="wait_time" type="float" value="1"/>
+   </properties>
+   <ellipse/>
+  </object>
+  <object id="9" type="Crystal" x="384" y="192" width="32" height="32">
+   <ellipse/>
+  </object>
+  <object id="12" type="Crystal" x="384" y="352" width="32" height="32">
+   <ellipse/>
+  </object>
+  <object id="13" type="Crystal" x="416" y="288" width="32" height="32">
+   <ellipse/>
+  </object>
+ </objectgroup>
 </map>

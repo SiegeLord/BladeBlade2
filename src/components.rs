@@ -2,7 +2,7 @@ use crate::error::Result;
 use crate::utils::DT;
 use crate::{game_state, sprite, utils};
 use allegro::*;
-use na::{Point3, Vector2, Vector3};
+use na::{Point2, Point3, Vector2, Vector3};
 use nalgebra as na;
 use rand::prelude::*;
 use serde_derive::{Deserialize, Serialize};
@@ -41,6 +41,18 @@ impl Position
 pub struct Velocity
 {
 	pub pos: Vector3<f32>,
+	pub ground_pos: Vector3<f32>,
+}
+
+impl Velocity
+{
+	pub fn new(pos: Vector3<f32>) -> Self
+	{
+		Self {
+			pos: pos,
+			ground_pos: Vector3::zeros(),
+		}
+	}
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -147,7 +159,7 @@ impl StatusAppearance
 	}
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum CollisionKind
 {
 	BigEnemy,
@@ -155,6 +167,7 @@ pub enum CollisionKind
 	SmallEnemy,
 	SmallPlayer,
 	World,
+	Platform,
 }
 
 impl CollisionKind
@@ -168,30 +181,42 @@ impl CollisionKind
 			(CollisionKind::BigEnemy, CollisionKind::SmallEnemy) => false,
 			(CollisionKind::BigEnemy, CollisionKind::SmallPlayer) => true,
 			(CollisionKind::BigEnemy, CollisionKind::World) => true,
+			(CollisionKind::BigEnemy, CollisionKind::Platform) => true,
 
 			(CollisionKind::BigPlayer, CollisionKind::BigEnemy) => true,
 			(CollisionKind::BigPlayer, CollisionKind::BigPlayer) => true,
 			(CollisionKind::BigPlayer, CollisionKind::SmallEnemy) => true,
 			(CollisionKind::BigPlayer, CollisionKind::SmallPlayer) => false,
 			(CollisionKind::BigPlayer, CollisionKind::World) => true,
+			(CollisionKind::BigPlayer, CollisionKind::Platform) => true,
 
 			(CollisionKind::SmallEnemy, CollisionKind::BigEnemy) => false,
 			(CollisionKind::SmallEnemy, CollisionKind::BigPlayer) => true,
 			(CollisionKind::SmallEnemy, CollisionKind::SmallEnemy) => false,
 			(CollisionKind::SmallEnemy, CollisionKind::SmallPlayer) => false,
 			(CollisionKind::SmallEnemy, CollisionKind::World) => true,
+			(CollisionKind::SmallEnemy, CollisionKind::Platform) => true,
 
 			(CollisionKind::SmallPlayer, CollisionKind::BigEnemy) => true,
 			(CollisionKind::SmallPlayer, CollisionKind::BigPlayer) => false,
 			(CollisionKind::SmallPlayer, CollisionKind::SmallEnemy) => false,
 			(CollisionKind::SmallPlayer, CollisionKind::SmallPlayer) => false,
 			(CollisionKind::SmallPlayer, CollisionKind::World) => true,
+			(CollisionKind::SmallPlayer, CollisionKind::Platform) => true,
 
 			(CollisionKind::World, CollisionKind::BigEnemy) => true,
-			(CollisionKind::World, CollisionKind::BigPlayer) => false,
-			(CollisionKind::World, CollisionKind::SmallEnemy) => false,
-			(CollisionKind::World, CollisionKind::SmallPlayer) => false,
-			(CollisionKind::World, CollisionKind::World) => true,
+			(CollisionKind::World, CollisionKind::BigPlayer) => true,
+			(CollisionKind::World, CollisionKind::SmallEnemy) => true,
+			(CollisionKind::World, CollisionKind::SmallPlayer) => true,
+			(CollisionKind::World, CollisionKind::World) => false,
+			(CollisionKind::World, CollisionKind::Platform) => false,
+
+			(CollisionKind::Platform, CollisionKind::BigEnemy) => true,
+			(CollisionKind::Platform, CollisionKind::BigPlayer) => true,
+			(CollisionKind::Platform, CollisionKind::SmallEnemy) => true,
+			(CollisionKind::Platform, CollisionKind::SmallPlayer) => true,
+			(CollisionKind::Platform, CollisionKind::World) => false,
+			(CollisionKind::Platform, CollisionKind::Platform) => false,
 		}
 	}
 
@@ -461,6 +486,16 @@ impl StatValues
 	}
 
 	pub fn new_corpse() -> Self
+	{
+		Self {
+			speed: 256.,
+			team: Team::Neutral,
+			max_life: 1.,
+			..Self::default()
+		}
+	}
+
+	pub fn new_platform() -> Self
 	{
 		Self {
 			speed: 256.,
@@ -1668,4 +1703,24 @@ fn make_rare_name(rng: &mut impl Rng) -> Vec<String>
 		format!("the {}", noun)
 	};
 	vec![prefix.to_string(), noun, suffix]
+}
+
+#[derive(Debug, Clone)]
+pub struct Waypoints
+{
+	pub waypoints: Vec<(Point2<f32>, f64)>,
+	pub time_to_move: f64,
+	pub cur_idx: usize,
+}
+
+impl Waypoints
+{
+	pub fn new(waypoints: Vec<(Point2<f32>, f64)>) -> Self
+	{
+		Self {
+			waypoints: waypoints,
+			time_to_move: 0.,
+			cur_idx: 0,
+		}
+	}
 }
