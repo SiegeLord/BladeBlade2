@@ -32,6 +32,7 @@ impl Game
 {
 	pub fn new(state: &mut game_state::GameState) -> Result<Self>
 	{
+		state.controls.clear_action_states();
 		//dbg!(100. * comps::ItemPrefix::ManaRegen.get_value(24, 0.15291262));
 		//return Err("Foo".to_string().into());
 		state.cache_sprite("data/slam.cfg")?;
@@ -44,6 +45,7 @@ impl Game
 		state.cache_sprite("data/cold_hit.cfg")?;
 		state.cache_sprite("data/lightning_hit.cfg")?;
 		state.cache_sprite("data/shadow.cfg")?;
+		state.cache_sprite("data/tree.cfg")?;
 		state.cache_sprite("data/terrain.cfg")?;
 		state.cache_sprite("data/crystal_red.cfg")?;
 		state.cache_sprite("data/crystal_blue.cfg")?;
@@ -1728,14 +1730,15 @@ struct Tiles
 	tiles: Vec<i32>,
 	width: i32,
 	height: i32,
-	start: Point2<f32>,
+	start: Option<Point2<f32>>,
 	platforms: Vec<Vec<(Point2<f32>, f64)>>,
 	crystals: Vec<Point2<f32>>,
+	sprite: String,
 }
 
 impl Tiles
 {
-	fn new(filename: &str) -> Result<Self>
+	fn new(filename: &str, sprite: &str) -> Result<Self>
 	{
 		let map = tiled::Loader::new().load_tmx_map(&Path::new(&filename))?;
 
@@ -1808,18 +1811,16 @@ impl Tiles
 					{
 						for x in 0..width
 						{
-							let id = layer.get_tile(x as i32, y as i32).unwrap().id();
+							let id = layer
+								.get_tile(x as i32, y as i32)
+								.map(|tile| tile.id())
+								.unwrap_or(0);
 							tiles.push(id as i32);
 						}
 					}
 				}
 				_ => (),
 			}
-		}
-
-		if start.is_none()
-		{
-			return Err("No start in map!".to_string().into());
 		}
 
 		let mut resolved_platforms = vec![];
@@ -1834,10 +1835,11 @@ impl Tiles
 		}
 
 		Ok(Self {
+			sprite: sprite.to_string(),
 			tiles: tiles,
 			width: width as i32,
 			height: height as i32,
-			start: start.unwrap(),
+			start: start,
 			platforms: resolved_platforms,
 			crystals: crystals,
 		})
@@ -1847,7 +1849,7 @@ impl Tiles
 		&self, pos: Point2<f32>, scene: &mut Scene, z_shift: f32, state: &game_state::GameState,
 	) -> Result<()>
 	{
-		let sprite = state.get_sprite("data/terrain.cfg")?;
+		let sprite = state.get_sprite(&self.sprite)?;
 		let palette_index = state
 			.palettes
 			.get_palette_index(&sprite.get_palettes()[0])?;
@@ -1855,7 +1857,7 @@ impl Tiles
 		{
 			for x in 0..self.width
 			{
-				let tile_idx = self.tiles[y as usize * self.height as usize + x as usize];
+				let tile_idx = self.tiles[y as usize * self.width as usize + x as usize];
 				if tile_idx == 0
 				{
 					continue;
@@ -1884,6 +1886,11 @@ impl Tiles
 			return TileKind::Empty;
 		}
 		TileKind::from_id(self.tiles[tile_y as usize * self.width as usize + tile_x as usize])
+	}
+
+	fn tile_is_floor(&self, pos: Point2<f32>) -> bool
+	{
+		self.get_tile_kind(pos) == TileKind::Floor
 	}
 
 	pub fn get_escape_dir(
@@ -1952,17 +1959,42 @@ impl Tiles
 	}
 }
 
+fn spawn_crystals_from_map(
+	tiles: &Tiles, crystal_seed: u64, level: i32, rng: &mut impl Rng, world: &mut hecs::World,
+) -> Result<()>
+{
+	let mut crystal_rng = StdRng::seed_from_u64(crystal_seed);
+	for crystal in &tiles.crystals
+	{
+		let crystal = spawn_crystal(
+			Point3::new(crystal.x, crystal.y, 0.),
+			*[
+				comps::ItemKind::Red,
+				comps::ItemKind::Blue,
+				comps::ItemKind::Green,
+			]
+			.choose(&mut crystal_rng)
+			.unwrap(),
+			world,
+		)?;
+		spawn_from_crystal(crystal, level, world, rng)?;
+	}
+	Ok(())
+}
+
 struct Map
 {
 	world: hecs::World,
 	player: hecs::Entity,
 	tiles: Tiles,
+	bkg_tiles: Tiles,
 	camera_pos: comps::Position,
 	camera_lookahead: Vector2<f32>,
 	show_depth: bool,
 	nearby_item: Option<hecs::Entity>,
 	inventory_shown: bool,
 	level: i32,
+	crystal_seed: u64,
 }
 
 impl Map
@@ -1971,10 +2003,8 @@ impl Map
 	{
 		let mut world = hecs::World::new();
 
-		let tiles = Tiles::new("data/test.tmx")?;
-
-		let spawn_pos = Point3::new(tiles.start.x, tiles.start.y, 0.);
-		let player = spawn_player(spawn_pos, &mut world)?;
+		let tiles = Tiles::new("data/test.tmx", "data/terrain.cfg")?;
+		let bkg_tiles = Tiles::new("data/tree.tmx", "data/tree.cfg")?;
 
 		for waypoints in &tiles.platforms
 		{
@@ -1984,32 +2014,24 @@ impl Map
 		let level = 1;
 		let mut rng = thread_rng();
 
-		for crystal in &tiles.crystals
-		{
-			let crystal = spawn_crystal(
-				Point3::new(crystal.x, crystal.y, 0.),
-				*[
-					comps::ItemKind::Red,
-					comps::ItemKind::Blue,
-					comps::ItemKind::Green,
-				]
-				.choose(&mut rng)
-				.unwrap(),
-				&mut world,
-			)?;
-			spawn_from_crystal(crystal, level, &mut world, &mut rng)?;
-		}
+		let start = tiles.start.unwrap();
+		let spawn_pos = Point3::new(start.x, start.y, 0.);
+		let player = spawn_player(spawn_pos, &mut world)?;
+		let crystal_seed = rng.gen::<u64>();
+		spawn_crystals_from_map(&tiles, crystal_seed, level, &mut rng, &mut world)?;
 
 		Ok(Self {
 			world: world,
 			player: player,
 			tiles: tiles,
+			bkg_tiles: bkg_tiles,
 			camera_pos: comps::Position::new(spawn_pos),
 			camera_lookahead: Vector2::zeros(),
 			show_depth: false,
 			nearby_item: None,
 			inventory_shown: false,
 			level: level,
+			crystal_seed: crystal_seed,
 		})
 	}
 
@@ -2673,8 +2695,7 @@ impl Map
 			)>()
 			.iter()
 		{
-			if position.pos.z <= 0.
-				&& self.tiles.get_tile_kind(position.pos.xy()) == TileKind::Floor
+			if position.pos.z <= 0. && self.tiles.tile_is_floor(position.pos.xy())
 			{
 				continue;
 			}
@@ -2957,14 +2978,14 @@ impl Map
 				}
 				if position.pos.z == 0.
 				{
-					if self.tiles.get_tile_kind(position.pos.xy()) == TileKind::Floor
+					if self.tiles.tile_is_floor(position.pos.xy())
 					{
 						velocity.ground_pos = Vector3::zeros();
 					}
 				}
 				else if position.pos.z < 0.
 				{
-					if self.tiles.get_tile_kind(position.pos.xy()) == TileKind::Floor
+					if self.tiles.tile_is_floor(position.pos.xy())
 					{
 						position.pos.z = 0.;
 						velocity.pos.z = 0.;
@@ -3093,6 +3114,59 @@ impl Map
 			{
 				to_die.push((true, id));
 			}
+		}
+
+		// Die from falling.
+		let mut do_reset = false;
+		for (id, position) in self.world.query::<&comps::Position>().iter()
+		{
+			if position.pos.z < -64.
+			{
+				if id == self.player
+				{
+					do_reset = true;
+				}
+				else
+				{
+					to_die.push((true, id));
+				}
+			}
+		}
+		if do_reset
+		{
+			for (id, _) in self.world.query_mut::<&comps::AI>()
+			{
+				to_die.push((false, id));
+			}
+			for (id, _) in self.world.query_mut::<&comps::Crystal>()
+			{
+				to_die.push((false, id));
+			}
+			for (id, _) in self.world.query_mut::<&comps::Corpse>()
+			{
+				to_die.push((false, id));
+			}
+			for (id, _) in self.world.query_mut::<&comps::Item>()
+			{
+				to_die.push((false, id));
+			}
+			if let Ok((position, velocity)) = self
+				.world
+				.query_one_mut::<(&mut comps::Position, &mut comps::Velocity)>(self.player)
+			{
+				let spawn = self.tiles.start.unwrap();
+				position.pos = Point3::new(spawn.x, spawn.y, 0.);
+				position.snapshot();
+				velocity.pos = Vector3::zeros();
+			}
+
+			spawn_crystals_from_map(
+				&self.tiles,
+				self.crystal_seed,
+				self.level,
+				&mut rng,
+				&mut self.world,
+			)?;
 		}
 
 		// On death effects.
@@ -3355,8 +3429,6 @@ impl Map
 	fn draw(&mut self, state: &game_state::GameState) -> Result<()>
 	{
 		state.core.clear_to_color(Color::from_rgb_f(0.0, 0.0, 0.1));
-		state.core.clear_depth_buffer(-1.);
-		state.core.set_depth_test(Some(DepthFunction::Greater));
 		let ortho_mat = Matrix4::new_orthographic(
 			0.,
 			state.buffer_width() as f32,
@@ -3372,7 +3444,6 @@ impl Map
 		let camera_shift = self.camera_shift(state);
 
 		// Tiles and appearances
-		let mut scene = Scene::new();
 		// TODO: Move the shader setup somewhere better.
 		state
 			.core
@@ -3387,6 +3458,20 @@ impl Map
 			.core
 			.set_shader_sampler("palette", &state.palettes.palette_bitmap, 2)
 			.ok();
+
+		state.core.set_depth_test(None);
+		let mut scene = Scene::new();
+		self.bkg_tiles.draw(
+			Point2::new(camera_shift.x * 0.25, camera_shift.y * 0.25),
+			&mut scene,
+			-self.camera_pos.pos.y * 0.25,
+			state,
+		)?;
+		scene.draw_triangles(state);
+
+		let mut scene = Scene::new();
+		state.core.clear_depth_buffer(-1.);
+		state.core.set_depth_test(Some(DepthFunction::Greater));
 
 		self.tiles.draw(
 			Point2::new(camera_shift.x, camera_shift.y),
@@ -3527,7 +3612,7 @@ impl Map
 			{
 				continue;
 			}
-			if self.tiles.get_tile_kind(position.pos.xy()) != TileKind::Floor
+			if self.tiles.tile_is_floor(position.pos.xy())
 			{
 				let diff = Vector2::new(1., 1.);
 				let mut over_platform = false;
