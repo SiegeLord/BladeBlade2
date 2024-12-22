@@ -11,12 +11,12 @@
     ],
     "propertyTypes": [
         {
-            "color": "#ff00ff00",
+            "color": "#ff00ffff",
             "drawFill": true,
-            "id": 1,
+            "id": 2,
             "members": [
             ],
-            "name": "Start",
+            "name": "Crystal",
             "type": "class",
             "useAs": [
                 "property",
@@ -31,12 +31,32 @@
             ]
         },
         {
-            "color": "#ff00ffff",
+            "color": "#ff88c6c4",
             "drawFill": true,
-            "id": 2,
+            "id": 6,
             "members": [
             ],
-            "name": "Crystal",
+            "name": "Doodad",
+            "type": "class",
+            "useAs": [
+                "property",
+                "map",
+                "layer",
+                "object",
+                "tile",
+                "tileset",
+                "wangcolor",
+                "wangset",
+                "project"
+            ]
+        },
+        {
+            "color": "#ffff0000",
+            "drawFill": true,
+            "id": 5,
+            "members": [
+            ],
+            "name": "Exit",
             "type": "class",
             "useAs": [
                 "property",
@@ -77,6 +97,26 @@
                 }
             ],
             "name": "Platform",
+            "type": "class",
+            "useAs": [
+                "property",
+                "map",
+                "layer",
+                "object",
+                "tile",
+                "tileset",
+                "wangcolor",
+                "wangset",
+                "project"
+            ]
+        },
+        {
+            "color": "#ff00ff00",
+            "drawFill": true,
+            "id": 1,
+            "members": [
+            ],
+            "name": "Start",
             "type": "class",
             "useAs": [
                 "property",

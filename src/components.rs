@@ -1078,10 +1078,10 @@ impl ItemPrefix
 		{
 			ItemPrefix::Life => (20., 1.),
 			ItemPrefix::LifeRegen => (1., 1.),
-			ItemPrefix::AddedPhysicalDamage => (5., 1.),
-			ItemPrefix::AddedColdDamage => (10., 1.),
-			ItemPrefix::AddedFireDamage => (10., 1.),
-			ItemPrefix::AddedLightningDamage => (10., 1.),
+			ItemPrefix::AddedPhysicalDamage => (2., 1.),
+			ItemPrefix::AddedColdDamage => (2., 1.),
+			ItemPrefix::AddedFireDamage => (2., 1.),
+			ItemPrefix::AddedLightningDamage => (2., 1.),
 			ItemPrefix::CriticalChance => (0.05, 0.01),
 			ItemPrefix::ChanceToFreeze => (0.01, 0.01),
 			ItemPrefix::ChanceToIgnite => (0.01, 0.01),
@@ -1724,3 +1724,6 @@ impl Waypoints
 		}
 	}
 }
+
+#[derive(Debug, Copy, Clone)]
+pub struct Exit;

@@ -35,6 +35,8 @@ impl Game
 		state.controls.clear_action_states();
 		//dbg!(100. * comps::ItemPrefix::ManaRegen.get_value(24, 0.15291262));
 		//return Err("Foo".to_string().into());
+		state.cache_sprite("data/doodad.cfg")?;
+		state.cache_sprite("data/exit.cfg")?;
 		state.cache_sprite("data/slam.cfg")?;
 		state.cache_sprite("data/archer.cfg")?;
 		state.cache_sprite("data/melee.cfg")?;
@@ -68,7 +70,7 @@ impl Game
 		state.cache_sprite("data/platform.cfg")?;
 
 		Ok(Self {
-			map: Map::new(state)?,
+			map: Map::new(comps::Inventory::new(), 1, state)?,
 			subscreens: ui::SubScreens::new(state),
 			inventory_screen: None,
 		})
@@ -106,7 +108,21 @@ impl Game
 		{
 			inventory_screen.logic(&mut self.map, state)?;
 		}
-		self.map.logic(state)
+		if let Ok(advance) = self.map.logic(state)
+		{
+			if advance
+			{
+				let inventory = (&*self
+					.map
+					.world
+					.get::<&comps::Inventory>(self.map.player)
+					.unwrap())
+					.clone();
+				self.map = Map::new(inventory, self.map.level + 1, state)?;
+			}
+		}
+
+		Ok(None)
 	}
 
 	pub fn input(
@@ -1078,9 +1094,10 @@ fn spawn_platform(
 	Ok(entity)
 }
 
-fn spawn_player(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
+fn spawn_player(
+	pos: Point3<f32>, inventory: comps::Inventory, world: &mut hecs::World,
+) -> Result<hecs::Entity>
 {
-	let inventory = comps::Inventory::new();
 	let entity = world.spawn((
 		comps::Appearance::new("data/player.cfg"),
 		comps::StatusAppearance::new(),
@@ -1364,6 +1381,30 @@ fn spawn_enemy(
 			],
 		},
 		inventory,
+	));
+	Ok(entity)
+}
+
+fn spawn_exit(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
+{
+	let entity = world.spawn((
+		comps::Appearance::new_with_bias("data/exit.cfg", 64),
+		comps::Position::new(pos),
+		comps::Exit,
+	));
+	Ok(entity)
+}
+
+fn spawn_doodad(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
+{
+	let entity = world.spawn((
+		comps::Appearance::new("data/doodad.cfg"),
+		comps::Position::new(pos),
+		comps::Solid {
+			size: 10.,
+			mass: std::f32::INFINITY,
+			kind: comps::CollisionKind::World,
+		},
 	));
 	Ok(entity)
 }
@@ -1731,8 +1772,10 @@ struct Tiles
 	width: i32,
 	height: i32,
 	start: Option<Point2<f32>>,
+	exit: Option<Point2<f32>>,
 	platforms: Vec<Vec<(Point2<f32>, f64)>>,
 	crystals: Vec<Point2<f32>>,
+	doodads: Vec<Point2<f32>>,
 	sprite: String,
 }
 
@@ -1749,7 +1792,9 @@ impl Tiles
 		let mut waypoints = HashMap::new();
 		let mut platforms = vec![];
 		let mut crystals = vec![];
+		let mut doodads = vec![];
 		let mut start = None;
+		let mut exit = None;
 
 		for layer in map.layers()
 		{
@@ -1765,9 +1810,17 @@ impl Tiles
 							{
 								start = Some(get_object_center(&object)?);
 							}
+							"Exit" =>
+							{
+								exit = Some(get_object_center(&object)?);
+							}
 							"Crystal" =>
 							{
 								crystals.push(get_object_center(&object)?);
+							}
+							"Doodad" =>
+							{
+								doodads.push(get_object_center(&object)?);
 							}
 							"Waypoint" =>
 							{
@@ -1840,8 +1893,10 @@ impl Tiles
 			width: width as i32,
 			height: height as i32,
 			start: start,
+			exit: exit,
 			platforms: resolved_platforms,
 			crystals: crystals,
+			doodads: doodads,
 		})
 	}
 
@@ -1994,12 +2049,16 @@ struct Map
 	nearby_item: Option<hecs::Entity>,
 	inventory_shown: bool,
 	level: i32,
+	num_crystals_done: i32,
 	crystal_seed: u64,
+	time_to_next_map: Option<f64>,
 }
 
 impl Map
 {
-	fn new(_state: &mut game_state::GameState) -> Result<Self>
+	fn new(
+		inventory: comps::Inventory, level: i32, _state: &mut game_state::GameState,
+	) -> Result<Self>
 	{
 		let mut world = hecs::World::new();
 
@@ -2011,12 +2070,16 @@ impl Map
 			spawn_platform(waypoints.clone(), &mut world)?;
 		}
 
-		let level = 1;
+		for pos in &tiles.doodads
+		{
+			spawn_doodad(Point3::new(pos.x, pos.y, 0.), &mut world)?;
+		}
+
 		let mut rng = thread_rng();
 
 		let start = tiles.start.unwrap();
 		let spawn_pos = Point3::new(start.x, start.y, 0.);
-		let player = spawn_player(spawn_pos, &mut world)?;
+		let player = spawn_player(spawn_pos, inventory, &mut world)?;
 		let crystal_seed = rng.gen::<u64>();
 		spawn_crystals_from_map(&tiles, crystal_seed, level, &mut rng, &mut world)?;
 
@@ -2032,6 +2095,8 @@ impl Map
 			inventory_shown: false,
 			level: level,
 			crystal_seed: crystal_seed,
+			num_crystals_done: 0,
+			time_to_next_map: None,
 		})
 	}
 
@@ -2047,8 +2112,7 @@ impl Map
 			+ Vector2::new(state.buffer_width() / 2., state.buffer_height() / 2.)
 	}
 
-	fn logic(&mut self, state: &mut game_state::GameState)
-		-> Result<Option<game_state::NextScreen>>
+	fn logic(&mut self, state: &mut game_state::GameState) -> Result<bool>
 	{
 		let mut to_die = vec![];
 		let mut rng = thread_rng();
@@ -2061,7 +2125,7 @@ impl Map
 		self.camera_pos.snapshot();
 		if state.paused
 		{
-			return Ok(None);
+			return Ok(false);
 		}
 
 		// Stats.
@@ -2336,7 +2400,7 @@ impl Map
 				* stats.values.acceleration;
 		}
 
-		for (_, (position, velocity, stats, jump, affected_by_gravity, controller)) in self
+		for (id, (position, velocity, stats, jump, affected_by_gravity, controller)) in self
 			.world
 			.query::<(
 				&comps::Position,
@@ -2354,6 +2418,14 @@ impl Map
 				//self.show_depth = !self.show_depth;
 				jump.jump_time = state.time();
 				velocity.pos.z += stats.values.jump_strength;
+
+				if id == self.player
+					&& self.num_crystals_done >= self.tiles.crystals.len() as i32
+					&& (position.pos.xy() - self.tiles.exit.unwrap()).norm() < 16.
+				{
+					velocity.pos.z += 2048.;
+					self.time_to_next_map = Some(state.time() + 1.0);
+				}
 			}
 			if want_jump && state.time() - jump.jump_time < 0.25
 			{
@@ -2463,6 +2535,14 @@ impl Map
 			.iter()
 		{
 			appearance.animation_state.set_new_animation("Dead");
+			appearance.speed = 1.;
+		}
+		for (_, (appearance, _)) in self
+			.world
+			.query::<(&mut comps::Appearance, &comps::Exit)>()
+			.iter()
+		{
+			appearance.animation_state.set_new_animation("Default");
 			appearance.speed = 1.;
 		}
 		for (id, (appearance, _)) in self
@@ -3082,12 +3162,26 @@ impl Map
 		}
 
 		// Crystal
+		let mut do_spawn_exit = false;
+		let old_crystals_done = self.num_crystals_done;
 		for (id, crystal) in self.world.query::<&comps::Crystal>().iter()
 		{
 			if crystal.enemies <= 0
 			{
 				to_die.push((true, id));
+				self.num_crystals_done += 1;
+				if self.num_crystals_done >= self.tiles.crystals.len() as i32
+				{
+					do_spawn_exit = true;
+				}
 			}
+		}
+
+		// Spawn exit.
+		if do_spawn_exit && (old_crystals_done < self.num_crystals_done)
+		{
+			let exit = self.tiles.exit.unwrap();
+			spawn_exit(Point3::new(exit.x, exit.y, 0.), &mut self.world)?;
 		}
 
 		// Camera
@@ -3124,7 +3218,10 @@ impl Map
 			{
 				if id == self.player
 				{
-					do_reset = true;
+					if self.world.get::<&comps::Corpse>(self.player).is_err()
+					{
+						do_reset = true;
+					}
 				}
 				else
 				{
@@ -3134,6 +3231,10 @@ impl Map
 		}
 		if do_reset
 		{
+			for (id, _) in self.world.query_mut::<&comps::Exit>()
+			{
+				to_die.push((false, id));
+			}
 			for (id, _) in self.world.query_mut::<&comps::AI>()
 			{
 				to_die.push((false, id));
@@ -3150,15 +3251,21 @@ impl Map
 			{
 				to_die.push((false, id));
 			}
-			if let Ok((position, velocity)) = self
-				.world
-				.query_one_mut::<(&mut comps::Position, &mut comps::Velocity)>(self.player)
+			if let Ok((position, velocity, stats)) = self.world.query_one_mut::<(
+				&mut comps::Position,
+				&mut comps::Velocity,
+				&mut comps::Stats,
+			)>(self.player)
 			{
 				let spawn = self.tiles.start.unwrap();
 				position.pos = Point3::new(spawn.x, spawn.y, 0.);
 				position.snapshot();
 				velocity.pos = Vector3::zeros();
+				stats.life = stats.values.max_life;
+				stats.mana = stats.values.max_mana;
 			}
+
+			self.num_crystals_done = 0;
 
 			spawn_crystals_from_map(
 				&self.tiles,
@@ -3407,6 +3514,14 @@ impl Map
 			spawn_fn(self)?;
 		}
 
+		if let Some(time_to_next_map) = self.time_to_next_map
+		{
+			if state.time() > time_to_next_map
+			{
+				return Ok(true);
+			}
+		}
+
 		// Remove dead entities
 		to_die.sort_by_key(|s_id| s_id.1);
 		to_die.dedup_by_key(|s_id| s_id.1);
@@ -3416,7 +3531,7 @@ impl Map
 			self.world.despawn(id)?;
 		}
 
-		Ok(None)
+		Ok(false)
 	}
 
 	fn input(
