@@ -1375,7 +1375,7 @@ fn spawn_exit(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
 		comps::Appearance::new_with_bias("data/exit.cfg", 64),
 		comps::Position::new(pos),
 		comps::Light {
-			color: Color::from_rgb_f(0.8, 0.8, 1.0),
+			color: Color::from_rgb_f(0.6, 1.0, 1.0),
 			offt_y: 0.,
 		},
 		comps::Exit,

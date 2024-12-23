@@ -31,7 +31,7 @@ impl Menu
 
 		Ok(Self {
 			subscreens: subscreens,
-			start_time: state.time(),
+			start_time: state.time() + 0.5,
 		})
 	}
 
@@ -124,13 +124,22 @@ impl Menu
 		let rc_buffer = game_state::light_pass(state);
 
 		state.core.set_target_bitmap(state.buffer1.as_ref());
-		state.core.clear_to_color(Color::from_rgb_f(0., 0., 0.5));
+		state.core.clear_to_color(Color::from_rgb_f(0., 0., 0.));
 		state
 			.core
 			.set_blender(BlendOperation::Add, BlendMode::One, BlendMode::InverseAlpha);
-		state
-			.core
-			.draw_bitmap(rc_buffer.unwrap(), 0., 0., Flag::zero());
+
+		if state.time() - self.start_time > 0.5
+		{
+			let f = utils::clamp(((state.time() - self.start_time - 0.5) / 2.) as f32, 0., 1.);
+			state.core.draw_tinted_bitmap(
+				rc_buffer.unwrap(),
+				Color::from_rgb_f(f, f, f),
+				0.,
+				0.,
+				Flag::zero(),
+			);
+		}
 
 		if !self.subscreens.is_empty()
 		{
