@@ -3690,7 +3690,7 @@ impl Map
 			);
 			let radius = stats.values.area_of_effect.sqrt();
 
-			draw_blade_blade(pos, 0., radius, blade_blade.num_blades, state);
+			draw_blade_blade(pos, 0., radius, blade_blade.num_blades, 1., 1., state);
 		}
 
 		let rc_buffer = game_state::light_pass(state);
@@ -3945,6 +3945,8 @@ impl Map
 				position.pos.y + 6. - self.camera_pos.pos.y,
 				radius,
 				blade_blade.num_blades,
+				1.,
+				1.,
 				state,
 			);
 		}
@@ -4136,8 +4138,9 @@ fn draw_orb(state: &game_state::GameState, r: f32, dx: f32, dy: f32, f: f32, col
 	);
 }
 
-fn draw_blade_blade(
-	pos: Point2<f32>, z_shift: f32, radius: f32, num_blades: i32, state: &game_state::GameState,
+pub fn draw_blade_blade(
+	pos: Point2<f32>, z_shift: f32, radius: f32, num_blades: i32, speed: f32, ratio: f32,
+	state: &game_state::GameState,
 )
 {
 	let mut trail_vertices = vec![];
@@ -4155,9 +4158,10 @@ fn draw_blade_blade(
 	{
 		let r = 32. * radius * radii[blade as usize];
 
-		let theta = 2.
-			* std::f64::consts::PI
-			* (state.time() / (1. - 0.5 * speeds[blade as usize] / 3.) + offsets[blade as usize]);
+		let theta = speed as f64
+			* 2. * std::f64::consts::PI
+			* ((state.time() + 25.) / (1. - 0.5 * speeds[blade as usize] / 3.)
+				+ offsets[blade as usize]);
 		let theta = theta.rem_euclid(2. * std::f64::consts::PI) as f32;
 
 		let one_blade_vertices = [
@@ -4188,7 +4192,7 @@ fn draw_blade_blade(
 		{
 			for j in 0..2
 			{
-				let theta2 = -0.25 * PI * (i + j) as f32 / 10.;
+				let theta2 = ratio * -0.25 * PI * (i + j) as f32 / 10.;
 				let dx = r * (theta2 + theta).cos();
 				let dy = r * (theta2 + theta).sin();
 				let z = dy + z_shift;

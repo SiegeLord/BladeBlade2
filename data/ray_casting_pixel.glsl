@@ -15,7 +15,8 @@ uniform int last_index;
 
 const float PI = 3.141592653;
 const float EPS = 0.001;
-const float POWER = 1.6;
+const float POWER = 1.2;
+//const float POWER = 1.;
 
 vec2 flip_y(vec2 uv)
 {
@@ -123,7 +124,7 @@ vec4 radiance_cascades()
 
             if (dist <= min_step_size)
             {
-                vec4 src_color = texture2D(al_tex, flip_y(src_uv));
+                vec4 src_color = pow(texture2D(al_tex, flip_y(src_uv)), vec4(POWER));
                 radiance_delta += src_color;
                 break;
             }

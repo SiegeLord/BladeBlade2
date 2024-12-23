@@ -415,8 +415,8 @@ impl StatValues
 			jump_strength: 128.,
 			team: Team::Player,
 
-			max_life: 10000.,
-			life_regen: 500.,
+			max_life: 100.,
+			life_regen: 5.,
 			max_mana: 100.,
 			mana_regen: 5.,
 
@@ -426,7 +426,7 @@ impl StatValues
 
 			critical_chance: 0.05,
 			critical_multiplier: 2.,
-			physical_damage: 1000.,
+			physical_damage: 10.,
 			//fire_damage: 5.,
 			//chance_to_ignite: 1.,
 			//lightning_damage: 5.,
