@@ -67,6 +67,7 @@ pub enum Material
 {
 	Default = 0,
 	Frozen = 1,
+	Lit = 2,
 }
 
 #[derive(Debug, Clone)]
@@ -414,8 +415,8 @@ impl StatValues
 			jump_strength: 128.,
 			team: Team::Player,
 
-			max_life: 100.,
-			life_regen: 5.,
+			max_life: 10000.,
+			life_regen: 500.,
 			max_mana: 100.,
 			mana_regen: 5.,
 
@@ -425,7 +426,7 @@ impl StatValues
 
 			critical_chance: 0.05,
 			critical_multiplier: 2.,
-			physical_damage: 10.,
+			physical_damage: 1000.,
 			//fire_damage: 5.,
 			//chance_to_ignite: 1.,
 			//lightning_damage: 5.,
@@ -436,28 +437,27 @@ impl StatValues
 		}
 	}
 
-	pub fn new_enemy(level: i32, rarity: Rarity) -> Self
+	pub fn new_enemy(level: i32, rarity: Rarity, ranged: bool) -> Self
 	{
-		let f = 1.1_f32.powf((level - 1) as f32);
 		let f = match rarity
 		{
-			Rarity::Normal => f,
-			Rarity::Magic => 1.5 * f,
-			Rarity::Rare => 3. * f,
+			Rarity::Normal => 1.,
+			Rarity::Magic => 1.5,
+			Rarity::Rare => 3.,
 		};
 
 		Self {
-			speed: 64.,
+			speed: if ranged { 64. } else { 96. },
 			acceleration: 1024.,
 			skill_duration: 1.,
-			max_life: (50. + 25. * level as f32) * f,
+			max_life: (50. + 15. * level as f32) * f,
 			mana_regen: 100.,
 			max_mana: 100.,
 			cast_speed: 1.,
 			critical_chance: 0.05,
 			critical_multiplier: 1.5,
 
-			physical_damage: (3. + 2. * level as f32) * f,
+			physical_damage: (3. + 3. * level as f32) * f,
 
 			area_of_effect: 1.,
 			..Self::default()
@@ -882,7 +882,7 @@ impl PlaceToDie
 pub enum Effect
 {
 	Die,
-	SpawnExplosion(String),
+	SpawnExplosion(String, Color),
 	DoDamage(StatValues, Team),
 	SpawnCorpse,
 	SpawnSoul(hecs::Entity),
@@ -1079,9 +1079,9 @@ impl ItemPrefix
 			ItemPrefix::Life => (20., 1.),
 			ItemPrefix::LifeRegen => (1., 1.),
 			ItemPrefix::AddedPhysicalDamage => (2., 1.),
-			ItemPrefix::AddedColdDamage => (2., 1.),
-			ItemPrefix::AddedFireDamage => (2., 1.),
-			ItemPrefix::AddedLightningDamage => (2., 1.),
+			ItemPrefix::AddedColdDamage => (5., 1.),
+			ItemPrefix::AddedFireDamage => (5., 1.),
+			ItemPrefix::AddedLightningDamage => (5., 1.),
 			ItemPrefix::CriticalChance => (0.05, 0.01),
 			ItemPrefix::ChanceToFreeze => (0.01, 0.01),
 			ItemPrefix::ChanceToIgnite => (0.01, 0.01),
@@ -1727,3 +1727,69 @@ impl Waypoints
 
 #[derive(Debug, Copy, Clone)]
 pub struct Exit;
+
+#[derive(Debug, Copy, Clone)]
+pub struct Light
+{
+	pub color: Color,
+	pub offt_y: f32,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct DamageSprites
+{
+	pub arrow: &'static str,
+	pub hit: &'static str,
+	pub color: Color,
+}
+
+pub fn damage_sprites(values: &StatValues, rarity: Rarity) -> DamageSprites
+{
+	let damage_idx = [
+		values.physical_damage as i32,
+		values.fire_damage as i32,
+		values.cold_damage as i32,
+		values.lightning_damage as i32,
+	]
+	.iter()
+	.enumerate()
+	.max_by_key(|(_, &v)| v)
+	.unwrap()
+	.0;
+
+	let f = match rarity
+	{
+		Rarity::Normal => 0.5,
+		Rarity::Magic => 0.75,
+		Rarity::Rare => 1.,
+	};
+
+	let (arrow, hit, color) = [
+		(
+			"data/arrow_normal.cfg",
+			"data/normal_hit.cfg",
+			Color::from_rgb_f(f, f, f),
+		),
+		(
+			"data/fireball.cfg",
+			"data/fire_hit.cfg",
+			Color::from_rgb_f(f, f, 0.),
+		),
+		(
+			"data/arrow_cold.cfg",
+			"data/cold_hit.cfg",
+			Color::from_rgb_f(0., 0., f),
+		),
+		(
+			"data/arrow_lightning.cfg",
+			"data/lightning_hit.cfg",
+			Color::from_rgb_f(0.5 * f, 0.5 * f, f),
+		),
+	][damage_idx];
+
+	DamageSprites {
+		arrow: arrow,
+		hit: hit,
+		color: color,
+	}
+}

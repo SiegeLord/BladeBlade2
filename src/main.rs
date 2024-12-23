@@ -59,6 +59,10 @@ fn real_main() -> Result<()>
 	state.basic_shader = utils::load_shader(&mut display, "data/basic")?;
 	state.resize_display(&display)?;
 	state.palette_shader = utils::load_shader(&mut display, "data/palette")?;
+	state.jfa_seed_shader = utils::load_shader(&mut display, "data/seed")?;
+	state.jfa_jump_shader = utils::load_shader(&mut display, "data/jump")?;
+	state.jfa_dist_shader = utils::load_shader(&mut display, "data/dist")?;
+	state.ray_casting_shader = utils::load_shader(&mut display, "data/ray_casting")?;
 
 	let timer = Timer::new(&state.core, utils::DT as f64)
 		.map_err(|_| "Couldn't create timer".to_string())?;

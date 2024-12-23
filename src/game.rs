@@ -35,6 +35,7 @@ impl Game
 		state.controls.clear_action_states();
 		//dbg!(100. * comps::ItemPrefix::ManaRegen.get_value(24, 0.15291262));
 		//return Err("Foo".to_string().into());
+		state.cache_bitmap("data/circle.png")?;
 		state.cache_sprite("data/doodad.cfg")?;
 		state.cache_sprite("data/exit.cfg")?;
 		state.cache_sprite("data/slam.cfg")?;
@@ -208,6 +209,9 @@ impl Game
 	pub fn draw(&mut self, state: &game_state::GameState) -> Result<()>
 	{
 		self.map.draw(state)?;
+		state
+			.core
+			.set_blender(BlendOperation::Add, BlendMode::One, BlendMode::InverseAlpha);
 		if let Some(inventory_screen) = self.inventory_screen.as_mut()
 		{
 			inventory_screen.draw(&self.map, state)?;
@@ -1042,39 +1046,6 @@ impl Scene
 	}
 }
 
-struct DamageSprites
-{
-	arrow: &'static str,
-	hit: &'static str,
-}
-
-fn damage_sprites(values: &comps::StatValues) -> DamageSprites
-{
-	let damage_idx = [
-		values.physical_damage as i32,
-		values.fire_damage as i32,
-		values.cold_damage as i32,
-		values.lightning_damage as i32,
-	]
-	.iter()
-	.enumerate()
-	.max_by_key(|(_, &v)| v)
-	.unwrap()
-	.0;
-
-	let (arrow, hit) = [
-		("data/arrow_normal.cfg", "data/normal_hit.cfg"),
-		("data/fireball.cfg", "data/fire_hit.cfg"),
-		("data/arrow_cold.cfg", "data/cold_hit.cfg"),
-		("data/arrow_lightning.cfg", "data/lightning_hit.cfg"),
-	][damage_idx];
-
-	DamageSprites {
-		arrow: arrow,
-		hit: hit,
-	}
-}
-
 fn spawn_platform(
 	waypoints: Vec<(Point2<f32>, f64)>, world: &mut hecs::World,
 ) -> Result<hecs::Entity>
@@ -1102,7 +1073,7 @@ fn spawn_player(
 		comps::Appearance::new("data/player.cfg"),
 		comps::StatusAppearance::new(),
 		comps::Position::new(pos),
-		comps::Velocity::new(Vector3::zeros()),
+		comps::Velocity::new(Vector3::new(0., 128., 256.)),
 		comps::Acceleration {
 			pos: Vector3::zeros(),
 		},
@@ -1113,16 +1084,25 @@ fn spawn_player(
 		},
 		comps::Stats::new(comps::StatValues::new_player()),
 		comps::Attack::new(comps::AttackKind::BladeBlade),
-		comps::Jump::new(),
-		comps::AffectedByGravity::new(),
-		comps::BladeBlade::new(),
-		comps::CastsShadow,
-		comps::Controller::new(),
-		comps::OnDeathEffect {
-			effects: vec![comps::Effect::SpawnCorpse],
-		},
-		inventory,
 	));
+	world.insert(
+		entity,
+		(
+			comps::Light {
+				color: Color::from_rgba_f(1., 0.5, 0.5, 1.),
+				offt_y: 16.,
+			},
+			comps::Jump::new(),
+			comps::AffectedByGravity::new(),
+			comps::BladeBlade::new(),
+			comps::CastsShadow,
+			comps::Controller::new(),
+			comps::OnDeathEffect {
+				effects: vec![comps::Effect::SpawnCorpse],
+			},
+			inventory,
+		),
+	)?;
 	Ok(entity)
 }
 
@@ -1176,14 +1156,14 @@ fn spawn_enemy(
 		.to_string(),
 	);
 
-	let level = match rarity
+	let (level, color) = match rarity
 	{
-		comps::Rarity::Normal => level,
-		comps::Rarity::Magic => level + 1,
-		comps::Rarity::Rare => level + 2,
+		comps::Rarity::Normal => (level, Color::from_rgb_f(0., 0., 0.)),
+		comps::Rarity::Magic => (level + 1, Color::from_rgb_f(0.2, 0.2, 1.)),
+		comps::Rarity::Rare => (level + 2, Color::from_rgb_f(1., 1., 0.2)),
 	};
 
-	let values = comps::StatValues::new_enemy(level, rarity);
+	let values = comps::StatValues::new_enemy(level, rarity, ranged);
 
 	let all_affixes = [
 		EnemyAffix::ExtraStrong,
@@ -1381,6 +1361,10 @@ fn spawn_enemy(
 			],
 		},
 		inventory,
+		comps::Light {
+			color: color,
+			offt_y: 16.,
+		},
 	));
 	Ok(entity)
 }
@@ -1390,6 +1374,10 @@ fn spawn_exit(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
 	let entity = world.spawn((
 		comps::Appearance::new_with_bias("data/exit.cfg", 64),
 		comps::Position::new(pos),
+		comps::Light {
+			color: Color::from_rgb_f(0.8, 0.8, 1.0),
+			offt_y: 0.,
+		},
 		comps::Exit,
 	));
 	Ok(entity)
@@ -1405,6 +1393,10 @@ fn spawn_doodad(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entit
 			mass: std::f32::INFINITY,
 			kind: comps::CollisionKind::World,
 		},
+		comps::Light {
+			color: Color::from_rgba_f(0., 0., 0., 1.),
+			offt_y: 0.,
+		},
 	));
 	Ok(entity)
 }
@@ -1413,11 +1405,11 @@ fn spawn_crystal(
 	pos: Point3<f32>, kind: comps::ItemKind, world: &mut hecs::World,
 ) -> Result<hecs::Entity>
 {
-	let sprite = match kind
+	let (sprite, color) = match kind
 	{
-		comps::ItemKind::Blue => "data/crystal_blue.cfg",
-		comps::ItemKind::Red => "data/crystal_red.cfg",
-		comps::ItemKind::Green => "data/crystal_green.cfg",
+		comps::ItemKind::Blue => ("data/crystal_blue.cfg", Color::from_rgb_f(0., 0., 1.)),
+		comps::ItemKind::Red => ("data/crystal_red.cfg", Color::from_rgb_f(1., 0., 0.)),
+		comps::ItemKind::Green => ("data/crystal_green.cfg", Color::from_rgb_f(1., 1., 0.)),
 	};
 	let entity = world.spawn((
 		comps::Appearance::new(sprite),
@@ -1427,13 +1419,16 @@ fn spawn_crystal(
 			mass: std::f32::INFINITY,
 			kind: comps::CollisionKind::World,
 		},
-		comps::CastsShadow,
 		comps::Crystal::new(kind),
 		comps::OnDeathEffect {
 			effects: vec![
 				comps::Effect::SpawnPowerSphere(kind),
 				comps::Effect::SpawnItems(kind),
 			],
+		},
+		comps::Light {
+			color: color,
+			offt_y: 16.,
 		},
 	));
 	Ok(entity)
@@ -1515,10 +1510,17 @@ fn spawn_item(
 	pos: Point3<f32>, vel_pos: Vector3<f32>, item: comps::Item, world: &mut hecs::World,
 ) -> Result<hecs::Entity>
 {
+	let (palette, color) = match item.rarity
+	{
+		comps::Rarity::Normal | comps::Rarity::Magic =>
+		{
+			("data/item_magic_pal.png", Color::from_rgb_f(0.2, 0.2, 1.))
+		}
+		comps::Rarity::Rare => ("data/item_rare_pal.png", Color::from_rgb_f(1., 1., 0.2)),
+	};
+
 	let mut appearance = comps::Appearance::new("data/item.cfg");
-	appearance.palette = Some(
-		["data/item_magic_pal.png", "data/item_rare_pal.png"][item.rarity as usize - 1].to_string(),
-	);
+	appearance.palette = Some(palette.to_string());
 	let entity = world.spawn((
 		appearance,
 		comps::Position::new(pos),
@@ -1527,7 +1529,6 @@ fn spawn_item(
 			pos: Vector3::zeros(),
 		},
 		comps::AffectedByGravity::new(),
-		comps::CastsShadow,
 		comps::Jump::new(),
 		comps::Solid {
 			size: 8.,
@@ -1535,8 +1536,13 @@ fn spawn_item(
 			kind: comps::CollisionKind::BigPlayer,
 		},
 		item,
+		comps::CastsShadow,
 		comps::Stats::new(comps::StatValues::new_item()),
 		comps::Controller::new(),
+		comps::Light {
+			color: color,
+			offt_y: 6.,
+		},
 	));
 	Ok(entity)
 }
@@ -1585,7 +1591,7 @@ fn spawn_fireball(
 	world: &mut hecs::World,
 ) -> Result<hecs::Entity>
 {
-	let sprites = damage_sprites(&damage_stat_values);
+	let sprites = comps::damage_sprites(&damage_stat_values, rarity);
 
 	let team = comps::Team::Enemy;
 	let entity = world.spawn((
@@ -1605,14 +1611,20 @@ fn spawn_fireball(
 		comps::OnContactEffect {
 			effects: vec![
 				comps::Effect::Die,
-				comps::Effect::SpawnExplosion(sprites.hit.to_string()),
+				comps::Effect::SpawnExplosion(sprites.hit.to_string(), sprites.color),
 				comps::Effect::DoDamage(damage_stat_values, team),
 			],
 		},
-		comps::OnDeathEffect {
-			effects: vec![comps::Effect::SpawnExplosion(sprites.hit.to_string())],
+		comps::Light {
+			color: sprites.color,
+			offt_y: 0.,
 		},
-		comps::CastsShadow,
+		comps::OnDeathEffect {
+			effects: vec![comps::Effect::SpawnExplosion(
+				sprites.hit.to_string(),
+				sprites.color,
+			)],
+		},
 	));
 	Ok(entity)
 }
@@ -1632,6 +1644,10 @@ fn spawn_soul(
 		comps::OnDeathEffect {
 			effects: vec![comps::Effect::UnlockCrystal(crystal_id)],
 		},
+		comps::Light {
+			color: Color::from_rgb_f(0.5, 0.5, 1.),
+			offt_y: 0.,
+		},
 		comps::PlaceToDie::new(target),
 	));
 	Ok(entity)
@@ -1645,6 +1661,10 @@ fn spawn_power_sphere(
 		comps::Appearance::new("data/power_sphere.cfg"),
 		comps::Position::new(pos),
 		comps::Velocity::new(Vector3::zeros()),
+		comps::Light {
+			color: Color::from_rgb_f(1., 1., 0.),
+			offt_y: 0.,
+		},
 		comps::Acceleration {
 			pos: 256. * (target - pos).normalize(),
 		},
@@ -1658,7 +1678,7 @@ fn spawn_power_sphere(
 }
 
 fn spawn_explosion(
-	pos: Point3<f32>, appearance: &str, world: &mut hecs::World,
+	pos: Point3<f32>, appearance: &str, color: Color, world: &mut hecs::World,
 ) -> Result<hecs::Entity>
 {
 	let mut appearance = comps::Appearance::new(appearance);
@@ -1667,6 +1687,10 @@ fn spawn_explosion(
 		appearance,
 		comps::Position::new(pos),
 		comps::DieOnActivation,
+		comps::Light {
+			color: color,
+			offt_y: 0.,
+		},
 	));
 	Ok(entity)
 }
@@ -1902,6 +1926,7 @@ impl Tiles
 
 	fn draw(
 		&self, pos: Point2<f32>, scene: &mut Scene, z_shift: f32, state: &game_state::GameState,
+		lit: bool,
 	) -> Result<()>
 	{
 		let sprite = state.get_sprite(&self.sprite)?;
@@ -1925,7 +1950,14 @@ impl Tiles
 					Point3::new(pos.x, pos.y, tile_pos.y + z_shift),
 					atlas_bmp,
 					palette_index,
-					0,
+					if lit
+					{
+						comps::Material::Lit
+					}
+					else
+					{
+						comps::Material::Default
+					} as i32,
 				);
 			}
 		}
@@ -2531,14 +2563,6 @@ impl Map
 		}
 		for (_, (appearance, _)) in self
 			.world
-			.query::<(&mut comps::Appearance, &comps::Corpse)>()
-			.iter()
-		{
-			appearance.animation_state.set_new_animation("Dead");
-			appearance.speed = 1.;
-		}
-		for (_, (appearance, _)) in self
-			.world
 			.query::<(&mut comps::Appearance, &comps::Exit)>()
 			.iter()
 		{
@@ -2575,6 +2599,24 @@ impl Map
 			{
 				appearance.material = comps::Material::Default;
 			}
+		}
+		for (_, (appearance, _)) in self
+			.world
+			.query::<(&mut comps::Appearance, &comps::Corpse)>()
+			.iter()
+		{
+			appearance.animation_state.set_new_animation("Dead");
+			appearance.material = comps::Material::Lit;
+			appearance.speed = 1.;
+		}
+		for (_, (appearance, _)) in self
+			.world
+			.query::<(&mut comps::Appearance, &comps::Waypoints)>()
+			.iter()
+		{
+			// HACK
+			appearance.material = comps::Material::Lit;
+			appearance.speed = 0.;
 		}
 		for (_, appearance) in self.world.query::<&mut comps::Appearance>().iter()
 		{
@@ -2670,7 +2712,12 @@ impl Map
 								let dir = Vector3::new(position.dir.cos(), position.dir.sin(), 0.);
 								let pos = position.pos + 14. * dir;
 								spawn_fns.push(Box::new(move |map| {
-									spawn_explosion(pos, "data/slam.cfg", &mut map.world)
+									spawn_explosion(
+										pos,
+										"data/slam.cfg",
+										Color::from_rgb_f(1., 1., 1.),
+										&mut map.world,
+									)
 								}));
 								slam_activations.push((id, pos, stats.values, 16.));
 							}
@@ -2881,7 +2928,7 @@ impl Map
 			.iter()
 		{
 			position.pos += DT * velocity.pos;
-			// HACK!
+			// HACK! to remove jitter
 			if velocity.pos.norm() == 0.
 			{
 				position.pos.set_xy(utils::round_point(position.pos.xy()));
@@ -3146,12 +3193,14 @@ impl Map
 					let diff_z = pos.z - other_position.pos.z;
 					if diff_xy.norm() < r && diff_z.abs() < 16.
 					{
+						let damage_sprites = comps::damage_sprites(&values, comps::Rarity::Normal);
 						effects.push((
 							id,
 							Some(other_id),
 							vec![
 								comps::Effect::SpawnExplosion(
-									damage_sprites(&values).hit.to_string(),
+									damage_sprites.hit.to_string(),
+									damage_sprites.color,
 								),
 								comps::Effect::DoDamage(values, values.team),
 							],
@@ -3260,7 +3309,7 @@ impl Map
 				let spawn = self.tiles.start.unwrap();
 				position.pos = Point3::new(spawn.x, spawn.y, 0.);
 				position.snapshot();
-				velocity.pos = Vector3::zeros();
+				velocity.pos = Vector3::new(0., 128., 256.);
 				stats.life = stats.values.max_life;
 				stats.mana = stats.values.max_mana;
 			}
@@ -3293,7 +3342,7 @@ impl Map
 				match (effect, other_id)
 				{
 					(comps::Effect::Die, _) => to_die.push((false, id)),
-					(comps::Effect::SpawnExplosion(explosion), other_id) =>
+					(comps::Effect::SpawnExplosion(explosion, color), other_id) =>
 					{
 						let mut pos = None;
 						if let Some(position) = other_id
@@ -3309,7 +3358,7 @@ impl Map
 						if let Some(pos) = pos
 						{
 							spawn_fns.push(Box::new(move |map| {
-								spawn_explosion(pos, &explosion, &mut map.world)
+								spawn_explosion(pos, &explosion, color, &mut map.world)
 							}));
 						}
 					}
@@ -3558,8 +3607,100 @@ impl Map
 
 		let camera_shift = self.camera_shift(state);
 
+		// Light buffer init
+		state.core.set_target_bitmap(state.light_buffer.as_ref());
+		state
+			.core
+			.use_projection_transform(&utils::mat4_to_transform(ortho_mat));
+		state
+			.core
+			.use_shader(Some(&*state.basic_shader.upgrade().unwrap()))
+			.unwrap();
+		state
+			.core
+			.set_blender(BlendOperation::Add, BlendMode::One, BlendMode::Zero);
+		state
+			.core
+			.clear_to_color(Color::from_rgba_f(0.0, 0.0, 0.0, 0.));
+		state
+			.core
+			.set_blender(BlendOperation::Add, BlendMode::One, BlendMode::InverseAlpha);
+
+		let mut vertices = vec![];
+		let mut indices = vec![];
+		for (_, (position, light)) in self.world.query_mut::<(&comps::Position, &comps::Light)>()
+		{
+			let draw_pos = position.draw_pos(state.alpha);
+			let pos = utils::round_point(
+				Point2::new(draw_pos.x, draw_pos.y - draw_pos.z - light.offt_y) + camera_shift,
+			);
+
+			let rad = 16.;
+			let offts = [
+				Point2::new(-rad, -rad),
+				Point2::new(rad, -rad),
+				Point2::new(rad, rad),
+				Point2::new(-rad, rad),
+			];
+
+			let idx = vertices.len() as i32;
+			indices.extend([idx + 0, idx + 1, idx + 3, idx + 1, idx + 2, idx + 3]);
+
+			let f = if draw_pos.z < 0.
+			{
+				1. - draw_pos.z.abs() / 8.
+			}
+			else
+			{
+				1. - draw_pos.z / 64.
+			};
+			let f = utils::clamp(f, 0., 1.);
+
+			let (r, g, b) = light.color.to_rgb_f();
+			for offt in offts
+			{
+				vertices.push(Vertex {
+					x: pos.x + offt.x,
+					y: pos.y + offt.y,
+					z: 0.,
+					u: (offt.x + rad) / (2. * rad),
+					v: (offt.y + rad) / (2. * rad),
+					color: Color::from_rgb_f(f * r, f * g, f * b),
+				});
+			}
+		}
+		state.prim.draw_indexed_prim(
+			&vertices[..],
+			//Option::<&Bitmap>::None,
+			Some(state.get_bitmap("data/circle.png").unwrap()),
+			&indices[..],
+			0,
+			indices.len() as u32,
+			PrimType::TriangleList,
+		);
+		// BladeBlade (light)
+		for (_, (position, blade_blade, stats)) in self
+			.world
+			.query::<(&comps::Position, &comps::BladeBlade, &comps::Stats)>()
+			.iter()
+		{
+			let draw_pos = position.draw_pos(state.alpha);
+			let pos = utils::round_point(
+				Point2::new(draw_pos.x, draw_pos.y - draw_pos.z - 8.) + camera_shift,
+			);
+			let radius = stats.values.area_of_effect.sqrt();
+
+			draw_blade_blade(pos, 0., radius, blade_blade.num_blades, state);
+		}
+
+		let rc_buffer = game_state::light_pass(state);
+
 		// Tiles and appearances
-		// TODO: Move the shader setup somewhere better.
+		let buffer_size = Vector2::new(state.buffer_width() as f32, state.buffer_height() as f32);
+		state.core.set_target_bitmap(state.buffer1.as_ref());
+		state
+			.core
+			.use_projection_transform(&utils::mat4_to_transform(ortho_mat));
 		state
 			.core
 			.use_shader(Some(&*state.palette_shader.upgrade().unwrap()))
@@ -3581,8 +3722,18 @@ impl Map
 			&mut scene,
 			-self.camera_pos.pos.y * 0.25,
 			state,
+			false,
 		)?;
 		scene.draw_triangles(state);
+
+		state
+			.core
+			.set_shader_uniform("bitmap_size", &[[buffer_size.x, buffer_size.y]][..])
+			.ok();
+		state
+			.core
+			.set_shader_sampler("light", rc_buffer.unwrap(), 3)
+			.ok();
 
 		let mut scene = Scene::new();
 		state.core.clear_depth_buffer(-1.);
@@ -3593,7 +3744,11 @@ impl Map
 			&mut scene,
 			-0.2 * TILE_SIZE - self.camera_pos.pos.y,
 			state,
+			true,
 		)?;
+		scene.draw_triangles(state);
+
+		let mut scene = Scene::new();
 		for (_, (appearance, position)) in self
 			.world
 			.query_mut::<(&comps::Appearance, &comps::Position)>()
@@ -3727,7 +3882,7 @@ impl Map
 			{
 				continue;
 			}
-			if self.tiles.tile_is_floor(position.pos.xy())
+			if !self.tiles.tile_is_floor(position.pos.xy())
 			{
 				let diff = Vector2::new(1., 1.);
 				let mut over_platform = false;
@@ -3774,10 +3929,6 @@ impl Map
 			.unwrap();
 
 		// BladeBlade
-		let mut trail_vertices = vec![];
-		let mut blade_vertices = vec![];
-		let mut blade_indices = vec![];
-
 		for (_, (position, blade_blade, stats)) in self
 			.world
 			.query::<(&comps::Position, &comps::BladeBlade, &comps::Stats)>()
@@ -3787,85 +3938,16 @@ impl Map
 			let pos = utils::round_point(
 				Point2::new(draw_pos.x, draw_pos.y - draw_pos.z - 8.) + camera_shift,
 			);
+			let radius = stats.values.area_of_effect.sqrt();
 
-			let radii: Vec<_> = [1., 0.5, 0.3, 0.7, 0.1, 0.6, 0.4, 0.9, 0.2, 0.8]
-				.iter()
-				.map(|&r| (r - 0.1) / 0.9 * 0.8 + 0.2)
-				.collect();
-			let offsets = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.];
-			let speeds = [0.1, 0.3, 0.5, 0.7, 1.1, 1.3, 1.7, 1.9, 2.3, 3.1];
-			let color = Color::from_rgb_f(1., 0.2, 0.2);
-
-			for blade in 0..blade_blade.num_blades
-			{
-				let r = 32. * stats.values.area_of_effect.sqrt() * radii[blade as usize];
-
-				let theta = 2.
-					* std::f64::consts::PI
-					* (state.time() / (1. - 0.5 * speeds[blade as usize] / 3.)
-						+ offsets[blade as usize]);
-				let theta = theta.rem_euclid(2. * std::f64::consts::PI) as f32;
-
-				let one_blade_vertices = [
-					Point2::new(0.5f32, 0.),
-					Point2::new(0., 1.0),
-					Point2::new(0., 0.),
-					Point2::new(0., -1.0),
-				];
-
-				let rot = Rotation2::new(theta);
-				let idx = blade_vertices.len() as i32;
-				blade_indices.extend([idx + 0, idx + 1, idx + 3, idx + 1, idx + 2, idx + 3]);
-				for vtx in one_blade_vertices
-				{
-					let vtx = rot * (3. * vtx + Vector2::new(r, 0.));
-					let z = position.pos.y + vtx.y - self.camera_pos.pos.y;
-					blade_vertices.push(Vertex {
-						x: pos.x + vtx.x,
-						y: pos.y + vtx.y,
-						z: z,
-						u: 0.,
-						v: 0.,
-						color: color,
-					});
-				}
-
-				for i in 0..10
-				{
-					for j in 0..2
-					{
-						let theta2 = -0.25 * PI * (i + j) as f32 / 10.;
-						let dx = r * (theta2 + theta).cos();
-						let dy = r * (theta2 + theta).sin();
-						let z = position.pos.y + dy - self.camera_pos.pos.y;
-
-						trail_vertices.push(Vertex {
-							x: pos.x + dx,
-							y: pos.y + dy,
-							z: z,
-							u: 0.,
-							v: 0.,
-							color: color,
-						})
-					}
-				}
-			}
+			draw_blade_blade(
+				pos,
+				position.pos.y + 6. - self.camera_pos.pos.y,
+				radius,
+				blade_blade.num_blades,
+				state,
+			);
 		}
-		state.prim.draw_prim(
-			&trail_vertices[..],
-			Option::<&Bitmap>::None,
-			0,
-			trail_vertices.len() as u32,
-			PrimType::LineList,
-		);
-		state.prim.draw_indexed_prim(
-			&blade_vertices[..],
-			Option::<&Bitmap>::None,
-			&blade_indices[..],
-			0,
-			blade_indices.len() as u32,
-			PrimType::TriangleList,
-		);
 
 		state
 			.core
@@ -3953,6 +4035,9 @@ impl Map
 			PrimType::TriangleList,
 		);
 
+		state
+			.core
+			.set_blender(BlendOperation::Add, BlendMode::One, BlendMode::InverseAlpha);
 		if let Ok(stats) = self.world.query_one_mut::<&comps::Stats>(self.player)
 		{
 			let orb_radius = if self.inventory_shown { 24. } else { 32. };
@@ -4048,5 +4133,90 @@ fn draw_orb(state: &game_state::GameState, r: f32, dx: f32, dy: f32, f: f32, col
 		0,
 		vertices.len() as u32,
 		PrimType::TriangleFan,
+	);
+}
+
+fn draw_blade_blade(
+	pos: Point2<f32>, z_shift: f32, radius: f32, num_blades: i32, state: &game_state::GameState,
+)
+{
+	let mut trail_vertices = vec![];
+	let mut blade_vertices = vec![];
+	let mut blade_indices = vec![];
+	let radii: Vec<_> = [1., 0.5, 0.3, 0.7, 0.1, 0.6, 0.4, 0.9, 0.2, 0.8]
+		.iter()
+		.map(|&r| (r - 0.1) / 0.9 * 0.8 + 0.2)
+		.collect();
+	let offsets = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.];
+	let speeds = [0.1, 0.3, 0.5, 0.7, 1.1, 1.3, 1.7, 1.9, 2.3, 3.1];
+	let color = Color::from_rgb_f(1., 0.2, 0.2);
+
+	for blade in 0..num_blades
+	{
+		let r = 32. * radius * radii[blade as usize];
+
+		let theta = 2.
+			* std::f64::consts::PI
+			* (state.time() / (1. - 0.5 * speeds[blade as usize] / 3.) + offsets[blade as usize]);
+		let theta = theta.rem_euclid(2. * std::f64::consts::PI) as f32;
+
+		let one_blade_vertices = [
+			Point2::new(0.5f32, 0.),
+			Point2::new(0., 1.0),
+			Point2::new(0., 0.),
+			Point2::new(0., -1.0),
+		];
+
+		let rot = Rotation2::new(theta);
+		let idx = blade_vertices.len() as i32;
+		blade_indices.extend([idx + 0, idx + 1, idx + 3, idx + 1, idx + 2, idx + 3]);
+		for vtx in one_blade_vertices
+		{
+			let vtx = rot * (3. * vtx + Vector2::new(r, 0.));
+			let z = vtx.y + z_shift;
+			blade_vertices.push(Vertex {
+				x: pos.x + vtx.x,
+				y: pos.y + vtx.y,
+				z: z,
+				u: 0.,
+				v: 0.,
+				color: color,
+			});
+		}
+
+		for i in 0..10
+		{
+			for j in 0..2
+			{
+				let theta2 = -0.25 * PI * (i + j) as f32 / 10.;
+				let dx = r * (theta2 + theta).cos();
+				let dy = r * (theta2 + theta).sin();
+				let z = dy + z_shift;
+
+				trail_vertices.push(Vertex {
+					x: pos.x + dx,
+					y: pos.y + dy,
+					z: z,
+					u: 0.,
+					v: 0.,
+					color: color,
+				})
+			}
+		}
+	}
+	state.prim.draw_prim(
+		&trail_vertices[..],
+		Option::<&Bitmap>::None,
+		0,
+		trail_vertices.len() as u32,
+		PrimType::LineList,
+	);
+	state.prim.draw_indexed_prim(
+		&blade_vertices[..],
+		Option::<&Bitmap>::None,
+		&blade_indices[..],
+		0,
+		blade_indices.len() as u32,
+		PrimType::TriangleList,
 	);
 }
