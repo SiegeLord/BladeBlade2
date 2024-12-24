@@ -10,6 +10,8 @@ use allegro_audio::*;
 
 use rand::prelude::*;
 
+const MAX_INSTANCES: usize = 10;
+
 pub struct Sfx
 {
 	audio: AudioAddon,
@@ -18,7 +20,7 @@ pub struct Sfx
 	stream: Option<AudioStream>,
 	music_file: String,
 	music_volume_factor: f32,
-	sample_instances: Vec<SampleInstance>,
+	sample_instances: HashMap<String, Vec<SampleInstance>>,
 	exclusive_sounds: Vec<String>,
 	exclusive_instance: Option<SampleInstance>,
 	sfx_volume: f32,
@@ -41,7 +43,7 @@ impl Sfx
 			audio: audio,
 			acodec: acodec,
 			sink: sink,
-			sample_instances: vec![],
+			sample_instances: HashMap::new(),
 			stream: None,
 			exclusive_instance: None,
 			exclusive_sounds: vec![],
@@ -77,7 +79,10 @@ impl Sfx
 
 	pub fn update_sounds(&mut self) -> Result<()>
 	{
-		self.sample_instances.retain(|s| s.get_playing().unwrap());
+		for instances in self.sample_instances.values_mut()
+		{
+			instances.retain(|s| s.get_playing().unwrap());
+		}
 		if let Some(ref stream) = self.stream
 		{
 			if !stream.get_playing()
@@ -115,6 +120,26 @@ impl Sfx
 		Ok(())
 	}
 
+	fn add_sample_instance(&mut self, name: &str, instance: SampleInstance)
+	{
+		match self.sample_instances.entry(name.to_string())
+		{
+			Entry::Occupied(o) =>
+			{
+				let instances = o.into_mut();
+
+				if instances.len() < MAX_INSTANCES
+				{
+					instances.push(instance);
+				}
+			}
+			Entry::Vacant(v) =>
+			{
+				v.insert(vec![instance]);
+			}
+		}
+	}
+
 	pub fn play_sound_with_pitch(&mut self, name: &str, pitch: f32) -> Result<()>
 	{
 		self.cache_sample(name)?;
@@ -129,7 +154,7 @@ impl Sfx
 				Playmode::Once,
 			)
 			.map_err(|_| "Couldn't play sound".to_string())?;
-		self.sample_instances.push(instance);
+		self.add_sample_instance(name, instance);
 		Ok(())
 	}
 
@@ -147,7 +172,7 @@ impl Sfx
 				Playmode::Once,
 			)
 			.map_err(|_| "Couldn't play sound".to_string())?;
-		self.sample_instances.push(instance);
+		self.add_sample_instance(name, instance);
 		Ok(())
 	}
 
@@ -168,34 +193,31 @@ impl Sfx
 	{
 		self.cache_sample(name)?;
 
-		if self.sample_instances.len() < 50
-		{
-			let sample = self.samples.get(name).unwrap();
+		let sample = self.samples.get(name).unwrap();
 
-			let dist_sq = (sound_pos - camera_pos).norm_squared();
-			let base_dist = 100.;
-			let volume = self.sfx_volume
-				* utils::clamp(
-					self.sfx_volume * volume * base_dist * base_dist / dist_sq,
-					0.,
-					1.,
-				);
-			//println!("volume: {}", volume);
-			let diff = sound_pos - camera_pos;
-			let pan = diff.x / (diff.x.powf(2.) + 32.0_f32.powf(2.)).sqrt();
+		let dist_sq = (sound_pos - camera_pos).norm_squared();
+		let base_dist = 100.;
+		let volume = self.sfx_volume
+			* utils::clamp(
+				self.sfx_volume * volume * base_dist * base_dist / dist_sq,
+				0.,
+				1.,
+			);
+		//println!("volume: {}", volume);
+		let diff = sound_pos - camera_pos;
+		let pan = diff.x / (diff.x.powf(2.) + 32.0_f32.powf(2.)).sqrt();
 
-			let instance = self
-				.sink
-				.play_sample(
-					sample,
-					volume,
-					Some(pan),
-					thread_rng().gen_range(0.9..1.1),
-					Playmode::Once,
-				)
-				.map_err(|_| "Couldn't play sound".to_string())?;
-			self.sample_instances.push(instance);
-		}
+		let instance = self
+			.sink
+			.play_sample(
+				sample,
+				volume,
+				Some(pan),
+				thread_rng().gen_range(0.9..1.1),
+				Playmode::Once,
+			)
+			.map_err(|_| "Couldn't play sound".to_string())?;
+		self.add_sample_instance(name, instance);
 		Ok(())
 	}
 
