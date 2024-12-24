@@ -1092,25 +1092,25 @@ impl OptionsMenu
 				Widget::Slider(Slider::new(
 					w,
 					h,
-					state.options.music_volume,
+					state.options.sfx_volume,
 					0.,
 					4.,
 					0.1,
 					|i| Action::SfxVolume(i),
 				)),
 			],
-			vec![
-				Widget::Label(Label::new(w, h, "UI Scale")),
-				Widget::Slider(Slider::new(
-					w,
-					h,
-					state.options.ui_scale,
-					1.,
-					4.,
-					0.25,
-					|i| Action::UiScale(i),
-				)),
-			],
+			//vec![
+			//	Widget::Label(Label::new(w, h, "UI Scale")),
+			//	Widget::Slider(Slider::new(
+			//		w,
+			//		h,
+			//		state.options.ui_scale,
+			//		1.,
+			//		4.,
+			//		0.25,
+			//		|i| Action::UiScale(i),
+			//	)),
+			//],
 			vec![
 				Widget::Label(Label::new(w, h, "Scroll")),
 				Widget::Slider(Slider::new(

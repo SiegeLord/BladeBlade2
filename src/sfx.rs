@@ -173,11 +173,16 @@ impl Sfx
 			let sample = self.samples.get(name).unwrap();
 
 			let dist_sq = (sound_pos - camera_pos).norm_squared();
+			let base_dist = 100.;
 			let volume = self.sfx_volume
-				* utils::clamp(self.sfx_volume * volume * 400000. / dist_sq, 0., 1.);
-			println!("volume: {}", volume);
+				* utils::clamp(
+					self.sfx_volume * volume * base_dist * base_dist / dist_sq,
+					0.,
+					1.,
+				);
+			//println!("volume: {}", volume);
 			let diff = sound_pos - camera_pos;
-			let pan = diff.x / (diff.x.powf(2.) + 100.0_f32.powf(2.)).sqrt();
+			let pan = diff.x / (diff.x.powf(2.) + 32.0_f32.powf(2.)).sqrt();
 
 			let instance = self
 				.sink

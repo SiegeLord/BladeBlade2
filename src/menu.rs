@@ -26,12 +26,14 @@ impl Menu
 		state.sfx.cache_sample("data/ui1.ogg")?;
 		state.sfx.cache_sample("data/ui2.ogg")?;
 		state.cache_sprite("data/logo.cfg")?;
+		state.sfx.set_music_file("data/title.ogg", 1.);
+		state.sfx.play_music()?;
 
 		let subscreens = ui::SubScreens::new(state);
 
 		Ok(Self {
 			subscreens: subscreens,
-			start_time: state.time() + 0.5,
+			start_time: state.time(),
 		})
 	}
 
@@ -116,6 +118,7 @@ impl Menu
 			10,
 			0.06,
 			ratio,
+			3.,
 			state,
 		);
 		let sprite = state.get_sprite("data/logo.cfg").unwrap();

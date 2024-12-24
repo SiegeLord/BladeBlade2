@@ -33,6 +33,8 @@ impl Game
 	pub fn new(state: &mut game_state::GameState) -> Result<Self>
 	{
 		state.controls.clear_action_states();
+		state.sfx.set_music_file("data/game.ogg", 0.5);
+		state.sfx.play_music()?;
 		//dbg!(100. * comps::ItemPrefix::ManaRegen.get_value(24, 0.15291262));
 		//return Err("Foo".to_string().into());
 		state.cache_bitmap("data/circle.png")?;
@@ -89,12 +91,14 @@ impl Game
 			{
 				if self.inventory_screen.is_none()
 				{
+					state.sfx.play_sound("data/ui1.ogg")?;
 					self.inventory_screen = Some(InventoryScreen::new(&self.map));
 					self.map.inventory_shown = true;
 					state.paused = true;
 				}
 				else
 				{
+					state.sfx.play_sound("data/ui1.ogg")?;
 					self.inventory_screen = None;
 					self.map.inventory_shown = false;
 					state.controls.clear_action_states();
@@ -323,6 +327,10 @@ impl InventoryScreen
 				best = (i as i32, dir.norm())
 			}
 		}
+		if best.0 != self.selection
+		{
+			state.sfx.play_sound("data/ui1.ogg")?;
+		}
 		self.selection = best.0;
 
 		if do_swap
@@ -331,6 +339,7 @@ impl InventoryScreen
 				let mut inventory = map.world.get::<&mut comps::Inventory>(map.player).unwrap();
 				inventory.slots[self.selection as usize].take()
 			};
+			let mut swapped = false;
 			if let Some(nearby_item_id) = map.nearby_item
 			{
 				let nearby_item = map.world.remove_one::<comps::Item>(nearby_item_id)?;
@@ -339,6 +348,7 @@ impl InventoryScreen
 
 				let mut inventory = map.world.get::<&mut comps::Inventory>(map.player).unwrap();
 				inventory.slots[self.selection as usize] = Some(nearby_item);
+				swapped = true;
 			}
 
 			if let Some(drop_item) = drop_item
@@ -351,6 +361,11 @@ impl InventoryScreen
 					&mut map.world,
 				)?;
 				map.nearby_item = Some(id);
+				swapped = true;
+			}
+			if swapped
+			{
+				state.sfx.play_sound("data/inventory.ogg")?;
 			}
 
 			if let Ok((inventory, stats)) = map
@@ -1098,7 +1113,7 @@ fn spawn_player(
 			comps::CastsShadow,
 			comps::Controller::new(),
 			comps::OnDeathEffect {
-				effects: vec![comps::Effect::SpawnCorpse],
+				effects: vec![comps::Effect::SpawnCorpse("data/player_dead.ogg")],
 			},
 			inventory,
 		),
@@ -1122,12 +1137,13 @@ fn spawn_enemy(
 	world: &mut hecs::World, rng: &mut impl Rng,
 ) -> Result<hecs::Entity>
 {
-	let (ai, mut appearance, attack) = if ranged
+	let (ai, mut appearance, attack, dead_sound) = if ranged
 	{
 		(
 			comps::AI::new_ranged(pos),
 			comps::Appearance::new("data/archer.cfg"),
 			comps::AttackKind::Fireball(rarity),
+			"data/ranged_dead.ogg",
 		)
 	}
 	else
@@ -1136,6 +1152,7 @@ fn spawn_enemy(
 			comps::AI::new_melee(pos),
 			comps::Appearance::new("data/melee.cfg"),
 			comps::AttackKind::Slam,
+			"data/melee_dead.ogg",
 		)
 	};
 
@@ -1356,7 +1373,7 @@ fn spawn_enemy(
 		comps::Controller::new(),
 		comps::OnDeathEffect {
 			effects: vec![
-				comps::Effect::SpawnCorpse,
+				comps::Effect::SpawnCorpse(dead_sound),
 				comps::Effect::SpawnSoul(crystal_id),
 			],
 		},
@@ -1611,7 +1628,11 @@ fn spawn_fireball(
 		comps::OnContactEffect {
 			effects: vec![
 				comps::Effect::Die,
-				comps::Effect::SpawnExplosion(sprites.hit.to_string(), sprites.color),
+				comps::Effect::SpawnExplosion(
+					sprites.hit.to_string(),
+					sprites.color,
+					sprites.sound,
+				),
 				comps::Effect::DoDamage(damage_stat_values, team),
 			],
 		},
@@ -1623,6 +1644,7 @@ fn spawn_fireball(
 			effects: vec![comps::Effect::SpawnExplosion(
 				sprites.hit.to_string(),
 				sprites.color,
+				sprites.sound,
 			)],
 		},
 	));
@@ -2445,17 +2467,33 @@ impl Map
 			.iter()
 		{
 			let want_jump = controller.want_jump;
-			if position.pos.z == 0. && want_jump
+			if position.pos.z == 0. && want_jump && stats.values.jump_strength > 0.
 			{
 				//self.show_depth = !self.show_depth;
 				jump.jump_time = state.time();
 				velocity.pos.z += stats.values.jump_strength;
 
 				if id == self.player
+				{
+					state.sfx.play_positional_sound(
+						"data/jump.ogg",
+						position.pos.xy(),
+						self.camera_pos.pos.xy(),
+						1.,
+					)?;
+				}
+
+				if id == self.player
 					&& self.num_crystals_done >= self.tiles.crystals.len() as i32
 					&& (position.pos.xy() - self.tiles.exit.unwrap()).norm() < 16.
 				{
 					velocity.pos.z += 2048.;
+					state.sfx.play_positional_sound(
+						"data/exit.ogg",
+						position.pos.xy(),
+						self.camera_pos.pos.xy(),
+						1.,
+					)?;
 					self.time_to_next_map = Some(state.time() + 1.0);
 				}
 			}
@@ -2674,8 +2712,16 @@ impl Map
 						{
 							comps::AttackKind::Fireball(rarity) =>
 							{
+								state.sfx.play_positional_sound(
+									"data/ranged_attack.ogg",
+									position.pos.xy(),
+									self.camera_pos.pos.xy(),
+									1.,
+								)?;
 								// TODO: Spawn position?
-								let dir = (attack.target_position - position.pos).normalize();
+								let dir = (attack.target_position - position.pos
+									+ Vector3::new(0., 0., 8.))
+								.normalize();
 								let pos = position.pos.clone();
 								let time = state.time();
 								let stat_values = stats.values;
@@ -2696,7 +2742,7 @@ impl Map
 									let dir = dir.clone();
 									spawn_fns.push(Box::new(move |map| {
 										spawn_fireball(
-											pos + Vector3::new(0., 0., 16.),
+											pos + Vector3::new(0., 0., 10.),
 											dir * 100.,
 											dir * 100.,
 											stat_values,
@@ -2711,6 +2757,12 @@ impl Map
 							{
 								let dir = Vector3::new(position.dir.cos(), position.dir.sin(), 0.);
 								let pos = position.pos + 14. * dir;
+								state.sfx.play_positional_sound(
+									"data/slam.ogg",
+									position.pos.xy(),
+									self.camera_pos.pos.xy(),
+									1.,
+								)?;
 								spawn_fns.push(Box::new(move |map| {
 									spawn_explosion(
 										pos,
@@ -2740,9 +2792,20 @@ impl Map
 		}
 		for (id, skill_duration) in blade_blade_activations
 		{
-			if let Ok(blade_blade) = self.world.query_one_mut::<&mut comps::BladeBlade>(id)
+			if let Ok((position, blade_blade)) = self
+				.world
+				.query_one_mut::<(&comps::Position, &mut comps::BladeBlade)>(id)
 			{
 				blade_blade.time_to_remove = state.time() + skill_duration as f64;
+				if blade_blade.num_blades < 10
+				{
+					state.sfx.play_positional_sound(
+						"data/blade_blade.ogg",
+						position.pos.xy(),
+						self.camera_pos.pos.xy(),
+						1.,
+					)?;
+				}
 				blade_blade.num_blades = utils::min(10, blade_blade.num_blades + 1);
 			}
 		}
@@ -3033,6 +3096,15 @@ impl Map
 								if let Ok(mut velocity) =
 									self.world.get::<&mut comps::Velocity>(id1)
 								{
+									if id1 == self.player && velocity.pos.z < -16. && pass == 0
+									{
+										state.sfx.play_positional_sound(
+											"data/land.ogg",
+											position.pos.xy(),
+											self.camera_pos.pos.xy(),
+											1.,
+										)?;
+									}
 									velocity.pos.z = 0.;
 									velocity.ground_pos = platform_velocity;
 								}
@@ -3049,6 +3121,15 @@ impl Map
 								if let Ok(mut velocity) =
 									self.world.get::<&mut comps::Velocity>(id2)
 								{
+									if id2 == self.player && velocity.pos.z < -16. && pass == 0
+									{
+										state.sfx.play_positional_sound(
+											"data/land.ogg",
+											position.pos.xy(),
+											self.camera_pos.pos.xy(),
+											1.,
+										)?;
+									}
 									velocity.pos.z = 0.;
 									velocity.ground_pos = platform_velocity;
 								}
@@ -3114,6 +3195,15 @@ impl Map
 				{
 					if self.tiles.tile_is_floor(position.pos.xy())
 					{
+						if id == self.player
+						{
+							state.sfx.play_positional_sound(
+								"data/land.ogg",
+								position.pos.xy(),
+								self.camera_pos.pos.xy(),
+								1.,
+							)?;
+						}
 						position.pos.z = 0.;
 						velocity.pos.z = 0.;
 						velocity.ground_pos = Vector3::zeros();
@@ -3201,6 +3291,7 @@ impl Map
 								comps::Effect::SpawnExplosion(
 									damage_sprites.hit.to_string(),
 									damage_sprites.color,
+									damage_sprites.sound,
 								),
 								comps::Effect::DoDamage(values, values.team),
 							],
@@ -3213,10 +3304,19 @@ impl Map
 		// Crystal
 		let mut do_spawn_exit = false;
 		let old_crystals_done = self.num_crystals_done;
-		for (id, crystal) in self.world.query::<&comps::Crystal>().iter()
+		for (id, (position, crystal)) in self
+			.world
+			.query::<(&comps::Position, &comps::Crystal)>()
+			.iter()
 		{
 			if crystal.enemies <= 0
 			{
+				state.sfx.play_positional_sound(
+					"data/crystal_break.ogg",
+					position.pos.xy(),
+					self.camera_pos.pos.xy(),
+					1.,
+				)?;
 				to_die.push((true, id));
 				self.num_crystals_done += 1;
 				if self.num_crystals_done >= self.tiles.crystals.len() as i32
@@ -3342,7 +3442,7 @@ impl Map
 				match (effect, other_id)
 				{
 					(comps::Effect::Die, _) => to_die.push((false, id)),
-					(comps::Effect::SpawnExplosion(explosion, color), other_id) =>
+					(comps::Effect::SpawnExplosion(explosion, color, sound), other_id) =>
 					{
 						let mut pos = None;
 						if let Some(position) = other_id
@@ -3357,6 +3457,12 @@ impl Map
 
 						if let Some(pos) = pos
 						{
+							state.sfx.play_positional_sound(
+								sound,
+								pos.xy(),
+								self.camera_pos.pos.xy(),
+								1.,
+							)?;
 							spawn_fns.push(Box::new(move |map| {
 								spawn_explosion(pos, &explosion, color, &mut map.world)
 							}));
@@ -3401,7 +3507,7 @@ impl Map
 							}
 						}
 					}
-					(comps::Effect::SpawnCorpse, _) =>
+					(comps::Effect::SpawnCorpse(sound), _) =>
 					{
 						let inventory = if let Ok(inventory) =
 							self.world.query_one_mut::<&comps::Inventory>(id)
@@ -3431,6 +3537,12 @@ impl Map
 									id,
 								)
 							{
+								state.sfx.play_positional_sound(
+									sound,
+									position.pos.xy(),
+									self.camera_pos.pos.xy(),
+									1.,
+								)?;
 								let pos = position.pos.clone();
 								let vel_pos = velocity.pos.clone();
 								let mut appearance = appearance.clone();
@@ -3450,6 +3562,18 @@ impl Map
 									};
 									Ok(corpse_id)
 								}));
+							}
+						}
+						if frozen
+						{
+							if let Ok(position) = self.world.query_one_mut::<&comps::Position>(id)
+							{
+								state.sfx.play_positional_sound(
+									"data/shatter.ogg",
+									position.pos.xy(),
+									self.camera_pos.pos.xy(),
+									1.,
+								)?;
 							}
 						}
 					}
@@ -3522,12 +3646,27 @@ impl Map
 					}
 					(comps::Effect::ElevateCrystal(crystal_id), _) =>
 					{
-						if let Ok(crystal) =
-							self.world.query_one_mut::<&mut comps::Crystal>(crystal_id)
+						let mut do_spawn = None;
+						if let Ok((crystal, position)) = self
+							.world
+							.query_one_mut::<(&mut comps::Crystal, &comps::Position)>(crystal_id)
 						{
+							if crystal.level <= 7
+							{
+								do_spawn = Some(position.pos.clone());
+							}
 							crystal.level = utils::min(7, crystal.level + 1);
 						}
-						spawn_from_crystal(crystal_id, self.level, &mut self.world, &mut rng)?;
+						if let Some(spawn_pos) = do_spawn
+						{
+							spawn_from_crystal(crystal_id, self.level, &mut self.world, &mut rng)?;
+							state.sfx.play_positional_sound(
+								"data/spawn.ogg",
+								spawn_pos.xy(),
+								self.camera_pos.pos.xy(),
+								1.,
+							)?;
+						}
 					}
 					(comps::Effect::SpawnItems(kind), _) =>
 					{
@@ -3690,7 +3829,7 @@ impl Map
 			);
 			let radius = stats.values.area_of_effect.sqrt();
 
-			draw_blade_blade(pos, 0., radius, blade_blade.num_blades, 1., 1., state);
+			draw_blade_blade(pos, 0., radius, blade_blade.num_blades, 1., 1., 1., state);
 		}
 
 		let rc_buffer = game_state::light_pass(state);
@@ -3947,6 +4086,7 @@ impl Map
 				blade_blade.num_blades,
 				1.,
 				1.,
+				1.,
 				state,
 			);
 		}
@@ -4140,7 +4280,7 @@ fn draw_orb(state: &game_state::GameState, r: f32, dx: f32, dy: f32, f: f32, col
 
 pub fn draw_blade_blade(
 	pos: Point2<f32>, z_shift: f32, radius: f32, num_blades: i32, speed: f32, ratio: f32,
-	state: &game_state::GameState,
+	blade_scale: f32, state: &game_state::GameState,
 )
 {
 	let mut trail_vertices = vec![];
@@ -4176,7 +4316,7 @@ pub fn draw_blade_blade(
 		blade_indices.extend([idx + 0, idx + 1, idx + 3, idx + 1, idx + 2, idx + 3]);
 		for vtx in one_blade_vertices
 		{
-			let vtx = rot * (3. * vtx + Vector2::new(r, 0.));
+			let vtx = rot * (blade_scale * 3. * vtx + Vector2::new(r, 0.));
 			let z = vtx.y + z_shift;
 			blade_vertices.push(Vertex {
 				x: pos.x + vtx.x,

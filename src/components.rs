@@ -427,7 +427,6 @@ impl StatValues
 			critical_chance: 0.05,
 			critical_multiplier: 2.,
 			physical_damage: 10.,
-			//fire_damage: 5.,
 			//chance_to_ignite: 1.,
 			//lightning_damage: 5.,
 			//chance_to_shock: 1.,
@@ -882,9 +881,9 @@ impl PlaceToDie
 pub enum Effect
 {
 	Die,
-	SpawnExplosion(String, Color),
+	SpawnExplosion(String, Color, &'static str),
 	DoDamage(StatValues, Team),
-	SpawnCorpse,
+	SpawnCorpse(&'static str),
 	SpawnSoul(hecs::Entity),
 	UnlockCrystal(hecs::Entity),
 	SpawnPowerSphere(ItemKind),
@@ -1562,7 +1561,11 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 			let prefix = prefix_weights.choose_weighted(rng, |&(_, w)| w).unwrap().0;
 			if prefixes.iter().find(|p| p.0 == prefix).is_none()
 			{
-				prefixes.push((prefix, rng.gen_range(0..=level), rng.gen_range(0.0..1.0f32)));
+				prefixes.push((
+					prefix,
+					rng.gen_range(level / 2..=level),
+					rng.gen_range(0.0..1.0f32),
+				));
 				break;
 			}
 		}
@@ -1576,7 +1579,11 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 			let suffix = suffix_weights.choose_weighted(rng, |&(_, w)| w).unwrap().0;
 			if suffixes.iter().find(|p| p.0 == suffix).is_none()
 			{
-				suffixes.push((suffix, rng.gen_range(0..=level), rng.gen_range(0.0..1.0f32)));
+				suffixes.push((
+					suffix,
+					rng.gen_range(level / 2..=level),
+					rng.gen_range(0.0..1.0f32),
+				));
 				break;
 			}
 		}
@@ -1741,6 +1748,7 @@ pub struct DamageSprites
 	pub arrow: &'static str,
 	pub hit: &'static str,
 	pub color: Color,
+	pub sound: &'static str,
 }
 
 pub fn damage_sprites(values: &StatValues, rarity: Rarity) -> DamageSprites
@@ -1764,26 +1772,30 @@ pub fn damage_sprites(values: &StatValues, rarity: Rarity) -> DamageSprites
 		Rarity::Rare => 1.,
 	};
 
-	let (arrow, hit, color) = [
+	let (arrow, hit, color, sound) = [
 		(
 			"data/arrow_normal.cfg",
 			"data/normal_hit.cfg",
 			Color::from_rgb_f(f, f, f),
+			"data/hit_normal.ogg",
 		),
 		(
 			"data/fireball.cfg",
 			"data/fire_hit.cfg",
 			Color::from_rgb_f(f, f, 0.),
+			"data/hit_fire.ogg",
 		),
 		(
 			"data/arrow_cold.cfg",
 			"data/cold_hit.cfg",
 			Color::from_rgb_f(0., 0., f),
+			"data/hit_cold.ogg",
 		),
 		(
 			"data/arrow_lightning.cfg",
 			"data/lightning_hit.cfg",
 			Color::from_rgb_f(0.5 * f, 0.5 * f, f),
+			"data/hit_lightning.ogg",
 		),
 	][damage_idx];
 
@@ -1791,5 +1803,6 @@ pub fn damage_sprites(values: &StatValues, rarity: Rarity) -> DamageSprites
 		arrow: arrow,
 		hit: hit,
 		color: color,
+		sound: sound,
 	}
 }
