@@ -22,12 +22,29 @@ Explosion - done
 
 Draw:
 
-Game UI
-Inventory UI
+Game UI - done
+Inventory UI - done
+Menu UI
 Spawn Effect
 More rings
 Explosion
 Shatter
+
+Logic:
+
+Tutorial Messages
+Death screen
+
+Uniques
+
+Cold Convert
+Lightning Convert
+Fire Convert
+
+Cold Propagate
+Lightning Propagate
+Fire Propagate
+Explode on death
 
 
 https://freesound.org/people/mousepatrol/sounds/405272/

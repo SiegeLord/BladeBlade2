@@ -59,6 +59,9 @@ impl Game
 		state.cache_sprite("data/soul.cfg")?;
 		state.cache_sprite("data/power_sphere.cfg")?;
 		state.cache_sprite("data/inventory_center_bkg.cfg")?;
+		state.cache_sprite("data/inventory_panel_tl.cfg")?;
+		state.cache_sprite("data/inventory_panel_bl.cfg")?;
+		state.cache_sprite("data/inventory_panel_r.cfg")?;
 		state.cache_sprite("data/inventory_cell.cfg")?;
 		state.cache_sprite("data/ring_red.cfg")?;
 		state.cache_sprite("data/item.cfg")?;
@@ -71,6 +74,8 @@ impl Game
 		state.cache_sprite("data/lightning_enchanted.cfg")?;
 		state.cache_sprite("data/fire_enchanted.cfg")?;
 		state.cache_sprite("data/platform.cfg")?;
+		state.cache_sprite("data/orb_small.cfg")?;
+		state.cache_sprite("data/orb_big.cfg")?;
 
 		Ok(Self {
 			map: Map::new(comps::Inventory::new(), 1, state)?,
@@ -407,24 +412,13 @@ impl InventoryScreen
 			.use_shader(Some(&*state.basic_shader.upgrade().unwrap()))
 			.unwrap();
 		state.core.set_depth_test(None);
-
-		let sprite = state.get_sprite("data/inventory_center_bkg.cfg")?;
-
-		let center = Point2::new(state.buffer_width() / 2., state.buffer_height() / 2.);
-		sprite.draw_frame(center, "Default", 0, state);
-
-		let sprite = state.get_sprite("data/inventory_cell.cfg")?;
 		let inventory = map.world.get::<&comps::Inventory>(map.player).unwrap();
 
-		for (i, cell_offt) in CELL_OFFTS.iter().enumerate()
-		{
-			let frame = if i as i32 == self.selection { 1 } else { 0 };
-			sprite.draw_frame(center + cell_offt, "Default", frame, state);
-		}
+		let center = Point2::new(state.buffer_width() / 2., state.buffer_height() / 2.);
 
 		let panel_width = 160.;
 		let panel_height = 160.;
-		let pad = 4.;
+		let pad = 6.;
 		let phys = Color::from_rgb_f(0.9, 0.9, 0.9);
 		let fire = Color::from_rgb_f(0.9, 0.3, 0.3);
 		let lightning = Color::from_rgb_f(0.9, 0.9, 0.3);
@@ -434,21 +428,23 @@ impl InventoryScreen
 		let rare = Color::from_rgb_f(0.9, 0.9, 0.3);
 
 		let stats_left = pad;
-		let stats_right = stats_left + panel_width;
 		let stats_top = state.buffer_height() as f32 / 2. - pad / 2. - panel_height;
-		let stats_bottom = stats_top + panel_height;
+		let stats_center =
+			Point2::new(stats_left + panel_width / 2., stats_top + panel_height / 2.);
 
 		let cur_item_left = pad;
-		let cur_item_right = cur_item_left + panel_width;
-		let cur_item_center = cur_item_left + panel_width / 2.;
 		let cur_item_top = state.buffer_height() as f32 / 2. + pad / 2.;
-		let cur_item_bottom = cur_item_top + panel_height;
+		let cur_item_center = Point2::new(
+			cur_item_left + panel_width / 2.,
+			cur_item_top + panel_height / 2.,
+		);
 
 		let ground_item_left = state.buffer_width() as f32 - panel_width - pad;
-		let ground_item_right = ground_item_left + panel_width;
-		let ground_item_center = ground_item_left + panel_width / 2.;
 		let ground_item_top = state.buffer_height() as f32 / 2. - panel_height / 2.;
-		let ground_item_bottom = ground_item_top + panel_height;
+		let ground_item_center = Point2::new(
+			ground_item_left + panel_width / 2.,
+			ground_item_top + panel_height / 2.,
+		);
 
 		let lh = state.ui_font().get_line_height() as f32;
 
@@ -457,13 +453,15 @@ impl InventoryScreen
 		let mut text_y = stats_top + pad / 2.;
 
 		let stats = map.world.get::<&comps::Stats>(map.player)?;
-		state.prim.draw_filled_rectangle(
-			stats_left,
-			stats_top,
-			stats_right,
-			stats_bottom,
-			Color::from_rgb_f(0., 0., 0.),
-		);
+		let sprite = state.get_sprite("data/inventory_panel_tl.cfg")?;
+		sprite.draw_frame(stats_center, "Default", 0, state);
+		//state.prim.draw_filled_rectangle(
+		//	stats_left,
+		//	stats_top,
+		//	stats_right,
+		//	stats_bottom,
+		//	Color::from_rgb_f(0., 0., 0.),
+		//);
 
 		state.core.draw_text(
 			state.ui_font(),
@@ -700,7 +698,7 @@ impl InventoryScreen
 			FontAlign::Left,
 			&format!(
 				"Criticals: {}% for {}x",
-				utils::nice_float(100. * stats.values.critical_chance, 2),
+				(100. * stats.values.critical_chance) as i32,
 				utils::nice_float(stats.values.critical_multiplier, 2)
 			),
 		);
@@ -711,13 +709,15 @@ impl InventoryScreen
 		if let Some(item) = inventory.slots[self.selection as usize].as_ref()
 		{
 			let item_color = [magic, rare][item.rarity as usize - 1];
-			state.prim.draw_filled_rectangle(
-				cur_item_left,
-				cur_item_top,
-				cur_item_right,
-				cur_item_bottom,
-				Color::from_rgb_f(0., 0., 0.),
-			);
+			let sprite = state.get_sprite("data/inventory_panel_bl.cfg")?;
+			sprite.draw_frame(cur_item_center, "Default", 0, state);
+			//state.prim.draw_filled_rectangle(
+			//	cur_item_left,
+			//	cur_item_top,
+			//	cur_item_right,
+			//	cur_item_bottom,
+			//	Color::from_rgb_f(0., 0., 0.),
+			//);
 
 			for name in &item.name
 			{
@@ -728,7 +728,7 @@ impl InventoryScreen
 				state.core.draw_text(
 					state.ui_font(),
 					item_color,
-					cur_item_center,
+					cur_item_center.x,
 					text_y,
 					FontAlign::Centre,
 					&name,
@@ -742,7 +742,7 @@ impl InventoryScreen
 				state.core.draw_text(
 					state.ui_font(),
 					Color::from_rgb_f(1., 1., 1.),
-					cur_item_center,
+					cur_item_center.x,
 					text_y,
 					FontAlign::Centre,
 					&prefix.get_mod_string(*tier, *frac),
@@ -754,7 +754,7 @@ impl InventoryScreen
 				state.core.draw_text(
 					state.ui_font(),
 					Color::from_rgb_f(1., 1., 1.),
-					cur_item_center,
+					cur_item_center.x,
 					text_y,
 					FontAlign::Centre,
 					&suffix.get_mod_string(*tier, *frac),
@@ -770,13 +770,15 @@ impl InventoryScreen
 			.and_then(|id| map.world.get::<&comps::Item>(id).ok())
 		{
 			let item_color = [magic, rare][item.rarity as usize - 1];
-			state.prim.draw_filled_rectangle(
-				ground_item_left,
-				ground_item_top,
-				ground_item_right,
-				ground_item_bottom,
-				Color::from_rgb_f(0., 0., 0.),
-			);
+			let sprite = state.get_sprite("data/inventory_panel_r.cfg")?;
+			sprite.draw_frame(ground_item_center, "Default", 0, state);
+			//state.prim.draw_filled_rectangle(
+			//	ground_item_left,
+			//	ground_item_top,
+			//	ground_item_right,
+			//	ground_item_bottom,
+			//	Color::from_rgb_f(0., 0., 0.),
+			//);
 
 			for name in &item.name
 			{
@@ -787,7 +789,7 @@ impl InventoryScreen
 				state.core.draw_text(
 					state.ui_font(),
 					item_color,
-					ground_item_center,
+					ground_item_center.x,
 					text_y,
 					FontAlign::Centre,
 					&name,
@@ -801,7 +803,7 @@ impl InventoryScreen
 				state.core.draw_text(
 					state.ui_font(),
 					Color::from_rgb_f(1., 1., 1.),
-					ground_item_center,
+					ground_item_center.x,
 					text_y,
 					FontAlign::Centre,
 					&prefix.get_mod_string(*tier, *frac),
@@ -813,7 +815,7 @@ impl InventoryScreen
 				state.core.draw_text(
 					state.ui_font(),
 					Color::from_rgb_f(1., 1., 1.),
-					ground_item_center,
+					ground_item_center.x,
 					text_y,
 					FontAlign::Centre,
 					&suffix.get_mod_string(*tier, *frac),
@@ -830,7 +832,7 @@ impl InventoryScreen
 					.unwrap_or(&sprite.get_palettes()[0]),
 			)?;
 
-			let pos = Point2::new(ground_item_center, ground_item_top - 16.);
+			let pos = Point2::new(ground_item_center.x, ground_item_top - 16.);
 
 			let (atlas_bmp, offt) = sprite.get_frame_from_state(&appearance.animation_state);
 
@@ -844,6 +846,16 @@ impl InventoryScreen
 				palette_index,
 				0,
 			);
+		}
+
+		let sprite = state.get_sprite("data/inventory_center_bkg.cfg")?;
+		sprite.draw_frame(center, "Default", 0, state);
+
+		let cell_sprite = state.get_sprite("data/inventory_cell.cfg")?;
+		for (i, cell_offt) in CELL_OFFTS.iter().enumerate()
+		{
+			let frame = if i as i32 == self.selection { 1 } else { 0 };
+			cell_sprite.draw_frame(center + cell_offt, "Default", frame, state);
 		}
 
 		for (i, (item, cell_offt)) in inventory.slots.iter().zip(CELL_OFFTS.iter()).enumerate()
@@ -2720,7 +2732,7 @@ impl Map
 								)?;
 								// TODO: Spawn position?
 								let dir = (attack.target_position - position.pos
-									+ Vector3::new(0., 0., 8.))
+									+ Vector3::new(0., 0., 2.))
 								.normalize();
 								let pos = position.pos.clone();
 								let time = state.time();
@@ -4180,19 +4192,20 @@ impl Map
 		state
 			.core
 			.set_blender(BlendOperation::Add, BlendMode::One, BlendMode::InverseAlpha);
+		let pad = 2.;
+		let lh = state.ui_font().get_line_height() as f32;
 		if let Ok(stats) = self.world.query_one_mut::<&comps::Stats>(self.player)
 		{
-			let orb_radius = if self.inventory_shown { 24. } else { 32. };
-			let pad = 4.;
-			let lh = state.ui_font().get_line_height() as f32;
+			let orb_radius = if self.inventory_shown { 23. } else { 31. };
 
-			let (orb_left, orb_right, orb_y, orb_top) = if self.inventory_shown
+			let (orb_left, orb_right, orb_y, orb_top, orb_sprite) = if self.inventory_shown
 			{
 				(
-					state.buffer_width() / 2. - orb_radius - pad,
-					state.buffer_width() / 2. + orb_radius + pad,
+					state.buffer_width() / 2. - orb_radius - pad - 2.,
+					state.buffer_width() / 2. + orb_radius + pad + 2.,
 					16. + pad + orb_radius,
 					16. + pad - lh,
+					"data/orb_small.cfg",
 				)
 			}
 			else
@@ -4202,6 +4215,7 @@ impl Map
 					state.buffer_width() as f32 - pad - orb_radius,
 					state.buffer_height() as f32 - pad - orb_radius,
 					state.buffer_height() as f32 - 2. * orb_radius - pad - lh,
+					"data/orb_big.cfg",
 				)
 			};
 
@@ -4225,6 +4239,9 @@ impl Map
 				Color::from_rgb_f(0.9, 0.2, 0.2),
 			);
 
+			let sprite = state.get_sprite(orb_sprite).unwrap();
+			sprite.draw_frame(Point2::new(orb_left, orb_y), "Default", 0, state);
+
 			state.core.draw_text(
 				state.ui_font(),
 				Color::from_rgb_f(1., 1., 1.),
@@ -4241,6 +4258,37 @@ impl Map
 				orb_y,
 				stats.mana / stats.values.max_mana,
 				Color::from_rgb_f(0.2, 0.2, 0.9),
+			);
+			sprite.draw_frame(Point2::new(orb_right, orb_y), "Default", 0, state);
+		}
+
+		//if !self.inventory_shown
+		{
+			state.core.draw_text(
+				state.ui_font(),
+				Color::from_rgb_f(1., 1., 1.),
+				pad + 6.,
+				pad,
+				FontAlign::Left,
+				&format!("Level: {}", self.level),
+			);
+
+			let num_crystals_left = self.tiles.crystals.len() as i32 - self.num_crystals_done;
+			let text = if num_crystals_left > 0
+			{
+				format!("Crystals: {}", num_crystals_left)
+			}
+			else
+			{
+				"Exit open!".to_string()
+			};
+			state.core.draw_text(
+				state.ui_font(),
+				Color::from_rgb_f(1., 1., 1.),
+				state.buffer_width() - pad - 6.,
+				pad,
+				FontAlign::Right,
+				&text,
 			);
 		}
 
