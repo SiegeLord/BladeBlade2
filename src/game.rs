@@ -38,6 +38,8 @@ impl Game
 		//dbg!(100. * comps::ItemPrefix::ManaRegen.get_value(24, 0.15291262));
 		//return Err("Foo".to_string().into());
 		state.cache_bitmap("data/circle.png")?;
+
+		state.cache_sprite("data/spawn.cfg")?;
 		state.cache_sprite("data/doodad.cfg")?;
 		state.cache_sprite("data/exit.cfg")?;
 		state.cache_sprite("data/slam.cfg")?;
@@ -234,6 +236,13 @@ impl Game
 			state.core.set_depth_test(None);
 
 			//state.core.clear_to_color(Color::from_rgb_f(0.0, 0.0, 0.0));
+			state.prim.draw_filled_rectangle(
+				0.,
+				0.,
+				state.buffer_width(),
+				state.buffer_height(),
+				Color::from_rgba_f(0., 0., 0., 0.75),
+			);
 			self.subscreens.draw(state);
 		}
 		Ok(())
@@ -1508,8 +1517,10 @@ fn spawn_from_crystal(
 		for _ in 0..count
 		{
 			let mut enemy_rng = enemy_rng_base.clone();
+			let pos = pos + Vector3::new(rng.gen_range(-5.0..5.0), rng.gen_range(-5.0..5.0), 0.0);
+			spawn_explosion(pos, "data/spawn.cfg", Color::from_rgb_f(0.8, 1., 1.), world)?;
 			spawn_enemy(
-				pos + Vector3::new(rng.gen_range(-5.0..5.0), rng.gen_range(-5.0..5.0), 0.0),
+				pos,
 				id,
 				rarity,
 				enemy_rng.gen_bool(0.5),
