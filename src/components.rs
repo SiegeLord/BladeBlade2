@@ -358,7 +358,18 @@ pub struct StatValues
 	pub chance_to_freeze: f32,
 	pub chance_to_shock: f32,
 
+	pub freeze_propagate_value: f32,
+	pub ignite_propagate_value: EffectAndDuration,
+	pub shock_propagate_value: EffectAndDuration,
+
+	pub increased_physical_damage: f32,
 	pub multishot: bool,
+	pub explode_on_death: bool,
+	pub freeze_propagate: bool,
+	pub ignite_propagate: bool,
+	pub shock_propagate: bool,
+
+	pub is_invincible: bool,
 }
 
 impl Default for StatValues
@@ -400,7 +411,18 @@ impl Default for StatValues
 			chance_to_freeze: 0.,
 			chance_to_shock: 0.,
 
+			freeze_propagate_value: 0.,
+			ignite_propagate_value: EffectAndDuration::new(),
+			shock_propagate_value: EffectAndDuration::new(),
+
+			increased_physical_damage: 0.,
 			multishot: false,
+			explode_on_death: false,
+			freeze_propagate: false,
+			ignite_propagate: false,
+			shock_propagate: false,
+
+			is_invincible: false,
 		}
 	}
 }
@@ -420,17 +442,23 @@ impl StatValues
 			max_mana: 100.,
 			mana_regen: 5.,
 
-			area_of_effect: 1.,
+			area_of_effect: 2.,
 			cast_speed: 1.,
 			skill_duration: 1.,
 
 			critical_chance: 0.05,
 			critical_multiplier: 2.,
 			physical_damage: 10.,
+
+			//freeze_propagate: true,
+			//ignite_propagate: true,
+			//shock_propagate: true,
+			//explode_on_death: true,
+			fire_damage: 10.,
 			//chance_to_ignite: 1.,
-			//lightning_damage: 5.,
+			lightning_damage: 10.,
 			//chance_to_shock: 1.,
-			//cold_damage: 5.,
+			cold_damage: 10.,
 			//chance_to_freeze: 1.,
 			..Self::default()
 		}
@@ -443,6 +471,7 @@ impl StatValues
 			Rarity::Normal => 1.,
 			Rarity::Magic => 1.5,
 			Rarity::Rare => 3.,
+			Rarity::Unique => 10.,
 		};
 
 		Self {
@@ -469,6 +498,7 @@ impl StatValues
 			speed: 256.,
 			acceleration: 1024.,
 			max_life: 1.,
+			is_invincible: true,
 			..Self::default()
 		}
 	}
@@ -480,6 +510,7 @@ impl StatValues
 			team: Team::Neutral,
 			jump_strength: 128.,
 			max_life: 1.,
+			is_invincible: true,
 			..Self::default()
 		}
 	}
@@ -490,6 +521,7 @@ impl StatValues
 			speed: 256.,
 			team: Team::Neutral,
 			max_life: 1.,
+			is_invincible: true,
 			..Self::default()
 		}
 	}
@@ -500,6 +532,7 @@ impl StatValues
 			speed: 256.,
 			team: Team::Neutral,
 			max_life: 1.,
+			is_invincible: true,
 			..Self::default()
 		}
 	}
@@ -510,6 +543,29 @@ pub struct RateInstance
 {
 	pub rate: f32,
 	pub time_to_remove: f64,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct EffectAndDuration
+{
+	pub effect: f32,
+	pub duration: f32,
+}
+
+impl EffectAndDuration
+{
+	pub fn new() -> Self
+	{
+		Self {
+			effect: 0.,
+			duration: 0.,
+		}
+	}
+
+	pub fn active(&self) -> bool
+	{
+		self.effect > 0. && self.duration > 0.
+	}
 }
 
 #[derive(Debug, Clone)]
@@ -524,6 +580,7 @@ pub struct Stats
 	pub old_max_life: f32,
 	pub old_max_mana: f32,
 	pub dead: bool,
+	pub exploded: bool,
 
 	pub life_leech_instances: Vec<RateInstance>,
 	pub mana_leech_instances: Vec<RateInstance>,
@@ -551,6 +608,7 @@ impl Stats
 			ignite_instances: vec![],
 			shock_instances: vec![],
 			freeze_time: 0.,
+			exploded: false,
 		}
 	}
 
@@ -608,6 +666,7 @@ impl Stats
 
 			self.values.physical_damage = (self.base_values.physical_damage + adds.physical_damage)
 				* (1. + increases.physical_damage);
+			self.values.increased_physical_damage = increases.physical_damage;
 			self.values.cold_damage =
 				(self.base_values.cold_damage + adds.cold_damage) * (1. + increases.cold_damage);
 			self.values.fire_damage =
@@ -640,11 +699,15 @@ impl Stats
 			self.values.chance_to_shock = (self.base_values.chance_to_shock + adds.chance_to_shock)
 				* (1. + increases.chance_to_shock);
 
-			self.values.multishot = adds.multishot;
+			self.values.multishot |= adds.multishot;
+			self.values.explode_on_death |= adds.explode_on_death;
+			self.values.shock_propagate |= adds.shock_propagate;
+			self.values.ignite_propagate |= adds.ignite_propagate;
+			self.values.freeze_propagate |= adds.freeze_propagate;
 
 			self.values.critical_chance = utils::min(1., self.values.critical_chance);
 
-			self.values.physical_resistance = utils::min(0.75, self.values.physical_resistance);
+			self.values.physical_resistance = utils::min(0.9, self.values.physical_resistance);
 			self.values.cold_resistance =
 				utils::clamp(self.values.cold_resistance - penalty * 0.1, -1., 0.75);
 			self.values.fire_resistance =
@@ -685,11 +748,18 @@ impl Stats
 
 	pub fn apply_damage(
 		&mut self, values: &StatValues, state: &mut game_state::GameState, rng: &mut impl Rng,
-	) -> (f32, f32)
+	) -> (f32, f32, bool, f32, EffectAndDuration, EffectAndDuration)
 	{
-		if self.dead
+		if self.dead || self.values.is_invincible
 		{
-			return (0., 0.);
+			return (
+				0.,
+				0.,
+				false,
+				0.,
+				EffectAndDuration::new(),
+				EffectAndDuration::new(),
+			);
 		}
 		let (crit, damage_mult) = if rng.gen_bool(values.critical_chance as f64)
 		{
@@ -718,47 +788,67 @@ impl Stats
 			damage_mult
 		};
 
+		let old_frozen = state.time() < self.freeze_time;
+		let mut freeze_duration = values.freeze_propagate_value;
 		if values.cold_damage > 0. && (crit || rng.gen_bool(values.chance_to_freeze as f64))
 		{
-			let freeze_duration = 10.
+			freeze_duration = 10.
 				* damage_mult
 				* values.skill_duration
 				* values.cold_damage
 				* (1. - self.values.cold_resistance)
 				/ self.values.max_life;
-			if freeze_duration > 0.1
-			{
-				self.freeze_time = state.time() + freeze_duration as f64;
-			}
 		}
+		if freeze_duration > 0.1
+		{
+			self.freeze_time = state.time() + freeze_duration as f64;
+		}
+
+		let old_ignited = !self.ignite_instances.is_empty();
+		let mut ignite = values.ignite_propagate_value;
 		if values.fire_damage > 0. && (crit || rng.gen_bool(values.chance_to_ignite as f64))
 		{
-			let ignite_duration = values.skill_duration * 2.;
-			self.ignite_instances.push(RateInstance {
-				rate: damage_mult * values.fire_damage * DT,
-				time_to_remove: state.time() + ignite_duration as f64,
-			});
+			ignite = EffectAndDuration {
+				effect: damage_mult * values.fire_damage * DT,
+				duration: values.skill_duration * 2.,
+			};
 		}
-		if values.lightning_damage > 0. && (crit || rng.gen_bool(values.chance_to_shock as f64))
+		if ignite.active()
 		{
-			let shock_duration = values.skill_duration * 2.;
-			self.shock_instances.push(RateInstance {
-				rate: damage_mult * values.lightning_damage,
-				time_to_remove: state.time() + shock_duration as f64,
+			self.ignite_instances.push(RateInstance {
+				rate: ignite.effect,
+				time_to_remove: state.time() + ignite.duration as f64,
 			});
 		}
 
-		let scaled_armor = self.values.armor * 10.;
-		let physical_damage = if values.physical_damage > 0.
+		let old_shocked = !self.shock_instances.is_empty();
+		let mut shock = values.shock_propagate_value;
+		if values.lightning_damage > 0. && (crit || rng.gen_bool(values.chance_to_shock as f64))
 		{
-			values.physical_damage * values.physical_damage
-				/ (values.physical_damage + scaled_armor)
+			shock = EffectAndDuration {
+				effect: damage_mult * values.lightning_damage,
+				duration: values.skill_duration * 2.,
+			};
+		}
+		if shock.active()
+		{
+			self.shock_instances.push(RateInstance {
+				rate: shock.effect,
+				time_to_remove: state.time() + shock.duration as f64,
+			})
+		}
+
+		let extra_phys_resistance = if self.values.armor > 0.
+		{
+			self.values.armor / (values.physical_damage + self.values.armor)
 		}
 		else
 		{
 			0.
 		};
-		let damage = physical_damage * (1. - self.values.physical_resistance)
+		let phys_resistance =
+			utils::min(0.9, self.values.physical_resistance + extra_phys_resistance);
+		let damage = values.physical_damage * (1. - phys_resistance)
 			+ values.cold_damage * (1. - self.values.cold_resistance)
 			+ values.fire_damage * (1. - self.values.fire_resistance)
 			+ values.lightning_damage * (1. - self.values.lightning_resistance);
@@ -766,7 +856,48 @@ impl Stats
 		let life_leech = final_damage * values.life_leech;
 		let mana_leech = final_damage * values.mana_leech;
 		self.life = utils::max(0., self.life - final_damage);
-		(life_leech, mana_leech)
+		let explode_on_death = if self.life == 0. && values.explode_on_death
+		{
+			self.exploded = true;
+			true
+		}
+		else
+		{
+			false
+		};
+
+		let freeze_propagation = if values.freeze_propagate && !old_frozen
+		{
+			freeze_duration
+		}
+		else
+		{
+			0.
+		};
+		let ignite_propagation = if values.ignite_propagate && !old_ignited
+		{
+			ignite
+		}
+		else
+		{
+			EffectAndDuration::new()
+		};
+		let shock_propagation = if values.shock_propagate && !old_shocked
+		{
+			shock
+		}
+		else
+		{
+			EffectAndDuration::new()
+		};
+		(
+			life_leech,
+			mana_leech,
+			explode_on_death,
+			freeze_propagation,
+			ignite_propagation,
+			shock_propagation,
+		)
 	}
 
 	pub fn logic(&mut self, state: &mut game_state::GameState)
@@ -823,6 +954,7 @@ pub enum AttackKind
 	BladeBlade,
 	Slam,
 	Fireball(Rarity),
+	Explode,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -1024,25 +1156,28 @@ impl Crystal
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(i32)]
 pub enum ItemPrefix
 {
-	Life = 0,
-	LifeRegen = 1,
-	AddedPhysicalDamage = 2,
-	AddedColdDamage = 3,
-	AddedFireDamage = 4,
-	AddedLightningDamage = 5,
-	CriticalChance = 6,
-	ChanceToFreeze = 7,
-	ChanceToIgnite = 8,
-	ChanceToShock = 9,
-	Mana = 10,
-	ManaRegen = 11,
-	AreaOfEffect = 12,
-	CastSpeed = 13,
-	MoveSpeed = 14,
-	MultiShot = 15,
+	Life,
+	LifeRegen,
+	AddedPhysicalDamage,
+	AddedColdDamage,
+	AddedFireDamage,
+	AddedLightningDamage,
+	CriticalChance,
+	ChanceToFreeze,
+	ChanceToIgnite,
+	ChanceToShock,
+	Mana,
+	ManaRegen,
+	AreaOfEffect,
+	CastSpeed,
+	MoveSpeed,
+	MultiShot,
+	ExplodeOnDeath,
+	FreezePropagate,
+	IgnitePropagate,
+	ShockPropagate,
 }
 
 impl ItemPrefix
@@ -1067,6 +1202,10 @@ impl ItemPrefix
 			ItemPrefix::CastSpeed => "Animated",
 			ItemPrefix::MoveSpeed => "Fast",
 			ItemPrefix::MultiShot => "MultiShot",
+			ItemPrefix::ExplodeOnDeath => "ExplodeOnDeath",
+			ItemPrefix::FreezePropagate => "FreezePropagate",
+			ItemPrefix::IgnitePropagate => "IgnitePropagate",
+			ItemPrefix::ShockPropagate => "ShockPropagate",
 		}
 	}
 
@@ -1091,6 +1230,10 @@ impl ItemPrefix
 			ItemPrefix::CastSpeed => (0.05, 0.01),
 			ItemPrefix::MoveSpeed => (0.01, 0.01),
 			ItemPrefix::MultiShot => (0.1, 0.01),
+			ItemPrefix::ExplodeOnDeath => (0.1, 0.01),
+			ItemPrefix::FreezePropagate => (0.1, 0.01),
+			ItemPrefix::IgnitePropagate => (0.1, 0.01),
+			ItemPrefix::ShockPropagate => (0.1, 0.01),
 		};
 		let start = delta * tier;
 		let end = delta * (tier + 1.);
@@ -1134,11 +1277,30 @@ impl ItemPrefix
 			ItemPrefix::CastSpeed => "Cast Speed",
 			ItemPrefix::MoveSpeed => "Move Speed",
 			ItemPrefix::MultiShot => "Multiple Shots",
+			ItemPrefix::ExplodeOnDeath => "Enemies Explode",
+			ItemPrefix::FreezePropagate => "Freezes Spread",
+			ItemPrefix::IgnitePropagate => "Ignites Spread",
+			ItemPrefix::ShockPropagate => "Shocks Spread",
 		};
-		format!(
-			"{sign}{value}{percent} {suffix}",
-			value = utils::nice_float(value, 1)
-		)
+		let unique = match self
+		{
+			ItemPrefix::ExplodeOnDeath
+			| ItemPrefix::FreezePropagate
+			| ItemPrefix::ShockPropagate
+			| ItemPrefix::IgnitePropagate => true,
+			_ => false,
+		};
+		if unique
+		{
+			suffix.to_string()
+		}
+		else
+		{
+			format!(
+				"{sign}{value}{percent} {suffix}",
+				value = utils::nice_float(value, 1)
+			)
+		}
 	}
 	pub fn apply(&self, tier: i32, frac: f32, adds: &mut StatValues, increases: &mut StatValues)
 	{
@@ -1208,6 +1370,22 @@ impl ItemPrefix
 			ItemPrefix::MultiShot =>
 			{
 				adds.multishot = true;
+			}
+			ItemPrefix::ExplodeOnDeath =>
+			{
+				adds.explode_on_death = true;
+			}
+			ItemPrefix::FreezePropagate =>
+			{
+				adds.freeze_propagate = true;
+			}
+			ItemPrefix::IgnitePropagate =>
+			{
+				adds.ignite_propagate = true;
+			}
+			ItemPrefix::ShockPropagate =>
+			{
+				adds.shock_propagate = true;
 			}
 		}
 	}
@@ -1379,6 +1557,7 @@ pub enum Rarity
 	Normal,
 	Magic,
 	Rare,
+	Unique,
 }
 
 #[derive(Debug, Clone)]
@@ -1407,28 +1586,78 @@ impl Inventory
 	}
 }
 
+pub fn generate_unique(rng: &mut impl Rng) -> Item
+{
+	match rng.gen_range(0..4)
+	{
+		1 => Item {
+			name: vec!["Polaris".to_string()],
+			appearance: Appearance::new("data/ring_cold.cfg"),
+			rarity: Rarity::Unique,
+			prefixes: vec![
+				(ItemPrefix::FreezePropagate, 1, 0.),
+				(ItemPrefix::ChanceToFreeze, 50, 0.),
+			],
+			suffixes: vec![],
+		},
+		2 => Item {
+			name: vec!["Rageheart".to_string()],
+			appearance: Appearance::new("data/ring_fire.cfg"),
+			rarity: Rarity::Unique,
+			prefixes: vec![
+				(ItemPrefix::IgnitePropagate, 1, 0.),
+				(ItemPrefix::ChanceToIgnite, 50, 0.),
+			],
+			suffixes: vec![],
+		},
+		3 => Item {
+			name: vec!["Tesla Coil".to_string()],
+			appearance: Appearance::new("data/ring_lightning.cfg"),
+			rarity: Rarity::Unique,
+			prefixes: vec![
+				(ItemPrefix::ShockPropagate, 1, 0.),
+				(ItemPrefix::ChanceToShock, 50, 0.),
+			],
+			suffixes: vec![],
+		},
+		_ => Item {
+			name: vec!["Uncontrollable".to_string(), "Hate".to_string()],
+			appearance: Appearance::new("data/ring_explode.cfg"),
+			rarity: Rarity::Unique,
+			prefixes: vec![(ItemPrefix::ExplodeOnDeath, 1, 0.)],
+			suffixes: vec![],
+		},
+	}
+}
+
 pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut impl Rng) -> Item
 {
 	let rarity_weights = match crystal_level
 	{
-		0 => (50, 5),
-		1 => (40, 5),
-		2 => (30, 5),
-		3 => (20, 5),
-		4 => (10, 5),
-		5 => (5, 10),
-		6 => (5, 20),
-		7 => (5, 30),
+		0 => (50, 5, 0),
+		1 => (40, 5, 0),
+		2 => (30, 5, 0),
+		3 => (20, 50, 0),
+		4 => (100, 50, 2),
+		5 => (100, 50, 3),
+		6 => (100, 50, 4),
+		7 => (100, 50, 5),
 		_ => unreachable!(),
 	};
 
 	let rarity = [
 		(Rarity::Magic, rarity_weights.0),
 		(Rarity::Rare, rarity_weights.1),
+		(Rarity::Unique, rarity_weights.2),
 	]
 	.choose_weighted(rng, |&(_, w)| w)
 	.unwrap()
 	.0;
+
+	if rarity == Rarity::Unique
+	{
+		return generate_unique(rng);
+	}
 
 	let red_prefix_weights = [
 		(ItemPrefix::Life, 1000),
@@ -1540,8 +1769,13 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 		blue_suffix_weights,
 	][kind as usize];
 
-	let num_affixes = [1, 3][rarity as usize - 1];
-	let min_affixes = [1, 3][rarity as usize - 1];
+	let (num_affixes, min_affixes) = match rarity
+	{
+		Rarity::Magic => (1, 1),
+		Rarity::Rare => (3, 3),
+		_ => unreachable!(),
+	};
+
 	let mut num_prefixes;
 	let mut num_suffixes;
 	loop
@@ -1597,12 +1831,19 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 			make_magic_name(kind, prefixes.first().copied(), suffixes.first().copied())
 		}
 		Rarity::Rare => make_rare_name(rng),
+		Rarity::Unique => unreachable!(),
 	};
 
 	prefixes.sort_by_key(|a| a.0);
 	suffixes.sort_by_key(|a| a.0);
 
-	let appearance = Appearance::new("data/ring_red.cfg");
+	let appearance = match kind
+	{
+		ItemKind::Red => "data/ring_red.cfg",
+		ItemKind::Green => "data/ring_yellow.cfg",
+		ItemKind::Blue => "data/ring_blue.cfg",
+	};
+	let appearance = Appearance::new(appearance);
 	let item = Item {
 		name: name,
 		rarity: rarity,
@@ -1753,32 +1994,46 @@ pub struct DamageSprites
 
 pub fn damage_sprites(values: &StatValues, rarity: Rarity) -> DamageSprites
 {
-	let damage_idx = [
-		values.physical_damage as i32,
+	let damage_vals = [
 		values.fire_damage as i32,
 		values.cold_damage as i32,
 		values.lightning_damage as i32,
-	]
-	.iter()
-	.enumerate()
-	.max_by_key(|(_, &v)| v)
-	.unwrap()
-	.0;
+		values.physical_damage as i32,
+	];
+	let damage_idx = if damage_vals.iter().sum::<i32>() == 0
+	{
+		let propagate_vals = [
+			(values.ignite_propagate_value.effect * 100.) as i32,
+			(values.freeze_propagate_value * 100.) as i32,
+			(values.shock_propagate_value.effect * 100.) as i32,
+			0,
+		];
+		propagate_vals
+			.iter()
+			.enumerate()
+			.max_by_key(|(_, &v)| v)
+			.unwrap()
+			.0
+	}
+	else
+	{
+		damage_vals
+			.iter()
+			.enumerate()
+			.max_by_key(|(_, &v)| v)
+			.unwrap()
+			.0
+	};
 
 	let f = match rarity
 	{
 		Rarity::Normal => 0.5,
 		Rarity::Magic => 0.75,
 		Rarity::Rare => 1.,
+		Rarity::Unique => 1.,
 	};
 
 	let (arrow, hit, color, sound) = [
-		(
-			"data/arrow_normal.cfg",
-			"data/normal_hit.cfg",
-			Color::from_rgb_f(f, f, f),
-			"data/hit_normal.ogg",
-		),
 		(
 			"data/fireball.cfg",
 			"data/fire_hit.cfg",
@@ -1796,6 +2051,12 @@ pub fn damage_sprites(values: &StatValues, rarity: Rarity) -> DamageSprites
 			"data/lightning_hit.cfg",
 			Color::from_rgb_f(0.5 * f, 0.5 * f, f),
 			"data/hit_lightning.ogg",
+		),
+		(
+			"data/arrow_normal.cfg",
+			"data/normal_hit.cfg",
+			Color::from_rgb_f(f, f, f),
+			"data/hit_normal.ogg",
 		),
 	][damage_idx];
 

@@ -7,10 +7,10 @@ use allegro_sys::*;
 use nalgebra::{Matrix4, Point2, Vector2, Vector3};
 
 pub const UNSELECTED: Color = Color::from_rgb_f(0.9, 0.9, 0.4);
-pub const LABEL: Color = Color::from_rgb_f(0.5 * 0.9, 0.5 * 0.9, 0.5 * 0.4);
+pub const LABEL: Color = Color::from_rgb_f(0.7 * 0.9, 0.7 * 0.9, 0.7 * 0.4);
 pub const SELECTED: Color = Color::from_rgb_f(1., 1., 1.);
 
-pub const HORIZ_SPACE: f32 = 48.;
+pub const HORIZ_SPACE: f32 = 16.;
 pub const VERT_SPACE: f32 = 16.;
 pub const BUTTON_WIDTH: f32 = 128.;
 pub const BUTTON_HEIGHT: f32 = 16.;
@@ -410,16 +410,23 @@ struct Label
 	loc: Point2<f32>,
 	size: Vector2<f32>,
 	text: String,
+	align: FontAlign,
 }
 
 impl Label
 {
 	fn new(w: f32, h: f32, text: &str) -> Self
 	{
+		Self::new_align(w, h, text, FontAlign::Centre)
+	}
+
+	fn new_align(w: f32, h: f32, text: &str, align: FontAlign) -> Self
+	{
 		Self {
 			loc: Point2::new(0., 0.),
 			size: Vector2::new(w, h),
 			text: text.into(),
+			align: align,
 		}
 	}
 
@@ -435,12 +442,18 @@ impl Label
 
 	fn draw(&self, state: &game_state::GameState)
 	{
+		let x = match self.align
+		{
+			FontAlign::Centre => self.loc.x,
+			FontAlign::Left => self.loc.x - self.size.x / 2.,
+			FontAlign::Right => self.loc.x + self.size.x / 2.,
+		};
 		state.core.draw_text(
 			state.ui_font(),
 			LABEL,
-			self.loc.x,
+			x,
 			self.loc.y - state.ui_font().get_line_height() as f32 / 2.,
-			FontAlign::Centre,
+			self.align,
 			&self.text,
 		);
 	}
@@ -807,7 +820,12 @@ impl MainMenu
 		let h = BUTTON_HEIGHT;
 
 		let widgets = WidgetList::new(&[
-			&[Widget::Button(Button::new(w, h, "New Game", Action::Start))],
+			&[Widget::Button(Button::new(
+				w,
+				h,
+				"New Game",
+				Action::Forward(|s| Ok(SubScreen::Story(Story::new(s)))),
+			))],
 			&[Widget::Button(Button::new(
 				w,
 				h,
@@ -850,6 +868,73 @@ impl MainMenu
 			FontAlign::Left,
 			&format!("Version: {}", game_state::VERSION),
 		);
+	}
+
+	pub fn input(&mut self, state: &mut game_state::GameState, event: &Event) -> Option<Action>
+	{
+		self.widgets.input(state, event)
+	}
+
+	pub fn resize(&mut self, state: &game_state::GameState)
+	{
+		let cx = state.buffer_width() / 2.;
+		let cy = state.buffer_height() / 2. + 16.;
+
+		self.widgets.pos.x = cx;
+		self.widgets.pos.y = cy;
+		self.widgets.resize(state);
+	}
+}
+
+pub struct Story
+{
+	widgets: WidgetList,
+}
+
+impl Story
+{
+	pub fn new(state: &game_state::GameState) -> Self
+	{
+		let w = BUTTON_WIDTH;
+		let h = BUTTON_HEIGHT;
+
+		let story = [
+			"For too long the ELVES have imposed arbitrary restriction ",
+			"on who gets what presents. Why do the the poor get tawdry",
+			"rubbish? Why do the rich get resplendent treasure? This ",
+			"separation is wrong.",
+			"",
+			"I will climb their gift-giving FIR TREE. ",
+			"I shall destroy all that divides and distinguishes...",
+			"",
+			"...with my BLADE BLADE.",
+		];
+
+		let mut widgets = vec![];
+
+		for line in story
+		{
+			widgets.push(vec![Widget::Label(Label::new_align(
+				state.buffer_width() - 2. * HORIZ_SPACE,
+				h,
+				line,
+				FontAlign::Left,
+			))]);
+		}
+		widgets.push(vec![
+			Widget::Button(Button::new(w, h, "Burn it all", Action::Start)),
+			Widget::Button(Button::new(w, h, "Reconsider", Action::Back)),
+		]);
+		let mut res = Self {
+			widgets: WidgetList::new(&widgets.iter().map(|r| &r[..]).collect::<Vec<_>>()),
+		};
+		res.resize(state);
+		res
+	}
+
+	pub fn draw(&self, state: &game_state::GameState)
+	{
+		self.widgets.draw(state);
 	}
 
 	pub fn input(&mut self, state: &mut game_state::GameState, event: &Event) -> Option<Action>
@@ -1248,6 +1333,7 @@ impl InGameMenu
 pub enum SubScreen
 {
 	MainMenu(MainMenu),
+	Story(Story),
 	ControlsMenu(ControlsMenu),
 	OptionsMenu(OptionsMenu),
 	InGameMenu(InGameMenu),
@@ -1260,6 +1346,7 @@ impl SubScreen
 		match self
 		{
 			SubScreen::MainMenu(s) => s.draw(state),
+			SubScreen::Story(s) => s.draw(state),
 			SubScreen::ControlsMenu(s) => s.draw(state),
 			SubScreen::OptionsMenu(s) => s.draw(state),
 			SubScreen::InGameMenu(s) => s.draw(state),
@@ -1271,6 +1358,7 @@ impl SubScreen
 		match self
 		{
 			SubScreen::MainMenu(s) => s.input(state, event),
+			SubScreen::Story(s) => s.input(state, event),
 			SubScreen::ControlsMenu(s) => s.input(state, event),
 			SubScreen::OptionsMenu(s) => s.input(state, event),
 			SubScreen::InGameMenu(s) => s.input(state, event),
@@ -1282,6 +1370,7 @@ impl SubScreen
 		match self
 		{
 			SubScreen::MainMenu(s) => s.resize(state),
+			SubScreen::Story(s) => s.resize(state),
 			SubScreen::ControlsMenu(s) => s.resize(state),
 			SubScreen::OptionsMenu(s) => s.resize(state),
 			SubScreen::InGameMenu(s) => s.resize(state),

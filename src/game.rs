@@ -1,4 +1,4 @@
-use crate::components::Velocity;
+use crate::components::{StatValues, Velocity};
 use crate::error::Result;
 use crate::utils::{XYExt, DT};
 use crate::{
@@ -21,6 +21,28 @@ use std::path::Path;
 const TILE_SIZE: f32 = 32.;
 const PI: f32 = std::f32::consts::PI;
 
+#[derive(Copy, Clone)]
+struct GameStats
+{
+	num_elves_killed: i32,
+	num_blades_cast: i32,
+	num_resets: i32,
+	num_crystals_done: i32,
+}
+
+impl GameStats
+{
+	fn new() -> Self
+	{
+		Self {
+			num_elves_killed: 0,
+			num_blades_cast: 0,
+			num_resets: 0,
+			num_crystals_done: 0,
+		}
+	}
+}
+
 pub struct Game
 {
 	map: Map,
@@ -39,7 +61,10 @@ impl Game
 		//return Err("Foo".to_string().into());
 		state.cache_bitmap("data/circle.png")?;
 
+		state.cache_sprite("data/damager.cfg")?;
 		state.cache_sprite("data/spawn.cfg")?;
+		state.cache_sprite("data/shatter.cfg")?;
+		state.cache_sprite("data/explosion.cfg")?;
 		state.cache_sprite("data/doodad.cfg")?;
 		state.cache_sprite("data/exit.cfg")?;
 		state.cache_sprite("data/slam.cfg")?;
@@ -66,6 +91,12 @@ impl Game
 		state.cache_sprite("data/inventory_panel_r.cfg")?;
 		state.cache_sprite("data/inventory_cell.cfg")?;
 		state.cache_sprite("data/ring_red.cfg")?;
+		state.cache_sprite("data/ring_yellow.cfg")?;
+		state.cache_sprite("data/ring_blue.cfg")?;
+		state.cache_sprite("data/ring_explode.cfg")?;
+		state.cache_sprite("data/ring_fire.cfg")?;
+		state.cache_sprite("data/ring_cold.cfg")?;
+		state.cache_sprite("data/ring_lightning.cfg")?;
 		state.cache_sprite("data/item.cfg")?;
 		state.cache_sprite("data/shocked.cfg")?;
 		state.cache_sprite("data/ignited.cfg")?;
@@ -80,7 +111,7 @@ impl Game
 		state.cache_sprite("data/orb_big.cfg")?;
 
 		Ok(Self {
-			map: Map::new(comps::Inventory::new(), 1, state)?,
+			map: Map::new(comps::Inventory::new(), 1, GameStats::new(), state)?,
 			subscreens: ui::SubScreens::new(state),
 			inventory_screen: None,
 		})
@@ -130,7 +161,7 @@ impl Game
 					.get::<&comps::Inventory>(self.map.player)
 					.unwrap())
 					.clone();
-				self.map = Map::new(inventory, self.map.level + 1, state)?;
+				self.map = Map::new(inventory, self.map.level + 1, self.map.stats, state)?;
 			}
 		}
 
@@ -251,6 +282,17 @@ impl Game
 	pub fn resize(&mut self, state: &game_state::GameState)
 	{
 		self.subscreens.resize(state);
+	}
+}
+
+fn get_item_color(rarity: comps::Rarity) -> Color
+{
+	match rarity
+	{
+		comps::Rarity::Normal => Color::from_rgb_f(1., 1., 1.),
+		comps::Rarity::Magic => Color::from_rgb_f(0.3, 0.3, 0.9),
+		comps::Rarity::Rare => Color::from_rgb_f(0.9, 0.9, 0.3),
+		comps::Rarity::Unique => Color::from_rgb_f(0.9, 0.6, 0.3),
 	}
 }
 
@@ -432,9 +474,6 @@ impl InventoryScreen
 		let fire = Color::from_rgb_f(0.9, 0.3, 0.3);
 		let lightning = Color::from_rgb_f(0.9, 0.9, 0.3);
 		let cold = Color::from_rgb_f(0.3, 0.3, 0.9);
-
-		let magic = Color::from_rgb_f(0.3, 0.3, 0.9);
-		let rare = Color::from_rgb_f(0.9, 0.9, 0.3);
 
 		let stats_left = pad;
 		let stats_top = state.buffer_height() as f32 / 2. - pad / 2. - panel_height;
@@ -717,7 +756,7 @@ impl InventoryScreen
 
 		if let Some(item) = inventory.slots[self.selection as usize].as_ref()
 		{
-			let item_color = [magic, rare][item.rarity as usize - 1];
+			let item_color = get_item_color(item.rarity);
 			let sprite = state.get_sprite("data/inventory_panel_bl.cfg")?;
 			sprite.draw_frame(cur_item_center, "Default", 0, state);
 			//state.prim.draw_filled_rectangle(
@@ -778,7 +817,7 @@ impl InventoryScreen
 			.nearby_item
 			.and_then(|id| map.world.get::<&comps::Item>(id).ok())
 		{
-			let item_color = [magic, rare][item.rarity as usize - 1];
+			let item_color = get_item_color(item.rarity);
 			let sprite = state.get_sprite("data/inventory_panel_r.cfg")?;
 			sprite.draw_frame(ground_item_center, "Default", 0, state);
 			//state.prim.draw_filled_rectangle(
@@ -1190,6 +1229,7 @@ fn spawn_enemy(
 			]
 			.choose(rng)
 			.unwrap(),
+			comps::Rarity::Unique => unreachable!(),
 		}
 		.to_string(),
 	);
@@ -1199,6 +1239,7 @@ fn spawn_enemy(
 		comps::Rarity::Normal => (level, Color::from_rgb_f(0., 0., 0.)),
 		comps::Rarity::Magic => (level + 1, Color::from_rgb_f(0.2, 0.2, 1.)),
 		comps::Rarity::Rare => (level + 2, Color::from_rgb_f(1., 1., 0.2)),
+		comps::Rarity::Unique => unreachable!(),
 	};
 
 	let values = comps::StatValues::new_enemy(level, rarity, ranged);
@@ -1244,6 +1285,7 @@ fn spawn_enemy(
 				}
 			}
 		}
+		comps::Rarity::Unique => unreachable!(),
 	}
 
 	let mut inventory = comps::Inventory::new();
@@ -1486,7 +1528,7 @@ fn spawn_from_crystal(
 	{
 		let mut count = 3 + crystal_level;
 
-		let weights = if level > 3
+		let weights = if level > 4
 		{
 			(6, 2, 1)
 		}
@@ -1518,7 +1560,12 @@ fn spawn_from_crystal(
 		{
 			let mut enemy_rng = enemy_rng_base.clone();
 			let pos = pos + Vector3::new(rng.gen_range(-5.0..5.0), rng.gen_range(-5.0..5.0), 0.0);
-			spawn_explosion(pos, "data/spawn.cfg", Color::from_rgb_f(0.8, 1., 1.), world)?;
+			spawn_explosion(
+				pos,
+				"data/spawn.cfg",
+				Some(Color::from_rgb_f(0.8, 1., 1.)),
+				world,
+			)?;
 			spawn_enemy(
 				pos,
 				id,
@@ -1557,6 +1604,7 @@ fn spawn_item(
 			("data/item_magic_pal.png", Color::from_rgb_f(0.2, 0.2, 1.))
 		}
 		comps::Rarity::Rare => ("data/item_rare_pal.png", Color::from_rgb_f(1., 1., 0.2)),
+		comps::Rarity::Unique => ("data/item_unique_pal.png", Color::from_rgb_f(1., 1., 0.2)),
 	};
 
 	let mut appearance = comps::Appearance::new("data/item.cfg");
@@ -1722,8 +1770,26 @@ fn spawn_power_sphere(
 	Ok(entity)
 }
 
+fn spawn_damager(
+	pos: Point3<f32>, values: comps::StatValues, world: &mut hecs::World,
+) -> Result<hecs::Entity>
+{
+	let mut appearance = comps::Appearance::new("data/damager.cfg");
+	appearance.bias = 1;
+	let mut attack = comps::Attack::new(comps::AttackKind::Explode);
+	attack.want_attack = true;
+	let entity = world.spawn((
+		appearance,
+		comps::Position::new(pos),
+		attack,
+		comps::DieOnActivation,
+		comps::Stats::new(values),
+	));
+	Ok(entity)
+}
+
 fn spawn_explosion(
-	pos: Point3<f32>, appearance: &str, color: Color, world: &mut hecs::World,
+	pos: Point3<f32>, appearance: &str, color: Option<Color>, world: &mut hecs::World,
 ) -> Result<hecs::Entity>
 {
 	let mut appearance = comps::Appearance::new(appearance);
@@ -1732,11 +1798,17 @@ fn spawn_explosion(
 		appearance,
 		comps::Position::new(pos),
 		comps::DieOnActivation,
-		comps::Light {
-			color: color,
-			offt_y: 0.,
-		},
 	));
+	if let Some(color) = color
+	{
+		world.insert_one(
+			entity,
+			comps::Light {
+				color: color,
+				offt_y: 0.,
+			},
+		)?;
+	}
 	Ok(entity)
 }
 
@@ -2129,12 +2201,14 @@ struct Map
 	num_crystals_done: i32,
 	crystal_seed: u64,
 	time_to_next_map: Option<f64>,
+	stats: GameStats,
 }
 
 impl Map
 {
 	fn new(
-		inventory: comps::Inventory, level: i32, _state: &mut game_state::GameState,
+		inventory: comps::Inventory, level: i32, stats: GameStats,
+		_state: &mut game_state::GameState,
 	) -> Result<Self>
 	{
 		let mut world = hecs::World::new();
@@ -2174,6 +2248,7 @@ impl Map
 			crystal_seed: crystal_seed,
 			num_crystals_done: 0,
 			time_to_next_map: None,
+			stats: stats,
 		})
 	}
 
@@ -2725,7 +2800,7 @@ impl Map
 		{
 			if attack.want_attack
 			{
-				for _ in 0..appearance.animation_state.drain_activations()
+				for _ in 0..appearance.animation_state.get_num_activations()
 				{
 					let mana_cost = 5. + self.level as f32 * 3.;
 					if mana_cost <= stats.mana
@@ -2790,11 +2865,34 @@ impl Map
 									spawn_explosion(
 										pos,
 										"data/slam.cfg",
-										Color::from_rgb_f(1., 1., 1.),
+										Some(Color::from_rgb_f(1., 1., 1.)),
 										&mut map.world,
 									)
 								}));
 								slam_activations.push((id, pos, stats.values, 16.));
+							}
+							comps::AttackKind::Explode =>
+							{
+								let pos = position.pos;
+								if stats.values.physical_damage > 0.
+								{
+									state.sfx.play_positional_sound(
+										"data/explosion.ogg",
+										position.pos.xy(),
+										self.camera_pos.pos.xy(),
+										1.,
+									)?;
+									spawn_fns.push(Box::new(move |map| {
+										spawn_explosion(
+											pos,
+											&"data/explosion.cfg",
+											Some(Color::from_rgb_f(1., 1., 1.)),
+											&mut map.world,
+										)
+									}));
+								}
+								let radius = 32. * stats.values.area_of_effect.sqrt();
+								slam_activations.push((id, pos, stats.values, radius));
 							}
 							comps::AttackKind::BladeBlade =>
 							{
@@ -2802,12 +2900,8 @@ impl Map
 							}
 						}
 					}
-					else
-					{
-						appearance.animation_state.drain_loops();
-					}
 				}
-				if appearance.animation_state.drain_loops() > 0
+				if appearance.animation_state.get_num_loops() > 0
 				{
 					attack.want_attack = false;
 				}
@@ -2828,6 +2922,7 @@ impl Map
 						self.camera_pos.pos.xy(),
 						1.,
 					)?;
+					self.stats.num_blades_cast += 1;
 				}
 				blade_blade.num_blades = utils::min(10, blade_blade.num_blades + 1);
 			}
@@ -2839,7 +2934,7 @@ impl Map
 			.query::<(&comps::DieOnActivation, &mut comps::Appearance)>()
 			.iter()
 		{
-			if appearance.animation_state.drain_activations() > 0
+			if appearance.animation_state.get_num_activations() > 0
 			{
 				to_die.push((true, id));
 			}
@@ -3296,12 +3391,16 @@ impl Map
 			for entry in entries
 			{
 				let other_id = entry.inner.id;
-				if let Some(other_position) = self
+				if let Some((other_position, other_stats)) = self
 					.world
-					.query_one::<&comps::Position>(other_id)
+					.query_one::<(&comps::Position, &comps::Stats)>(other_id)
 					.unwrap()
 					.get()
 				{
+					if other_stats.values.is_invincible
+					{
+						continue;
+					}
 					let diff_xy = pos.xy() - other_position.pos.xy();
 					let diff_z = pos.z - other_position.pos.z;
 					if diff_xy.norm() < r && diff_z.abs() < 16.
@@ -3340,6 +3439,7 @@ impl Map
 					self.camera_pos.pos.xy(),
 					1.,
 				)?;
+				self.stats.num_crystals_done += 1;
 				to_die.push((true, id));
 				self.num_crystals_done += 1;
 				if self.num_crystals_done >= self.tiles.crystals.len() as i32
@@ -3403,6 +3503,7 @@ impl Map
 		}
 		if do_reset
 		{
+			self.stats.num_resets += 1;
 			for (id, _) in self.world.query_mut::<&comps::Exit>()
 			{
 				to_die.push((false, id));
@@ -3487,7 +3588,7 @@ impl Map
 								1.,
 							)?;
 							spawn_fns.push(Box::new(move |map| {
-								spawn_explosion(pos, &explosion, color, &mut map.world)
+								spawn_explosion(pos, &explosion, Some(color), &mut map.world)
 							}));
 						}
 					}
@@ -3495,6 +3596,10 @@ impl Map
 					{
 						let mut life_leech = 0.;
 						let mut mana_leech = 0.;
+						let mut explode_on_death = false;
+						let mut freeze_propagate_value = 0.;
+						let mut ignite_propagate_value = comps::EffectAndDuration::new();
+						let mut shock_propagate_value = comps::EffectAndDuration::new();
 
 						if let Some(other_id) = other_id
 						{
@@ -3503,10 +3608,20 @@ impl Map
 							{
 								if team.can_damage(stats.values.team)
 								{
-									let (new_life_leech, new_mana_leech) =
-										stats.apply_damage(&damage_stat_values, state, &mut rng);
+									let (
+										new_life_leech,
+										new_mana_leech,
+										new_explode_on_death,
+										new_freeze_propagate_value,
+										new_ignite_propagate_value,
+										new_shock_propagate_value,
+									) = stats.apply_damage(&damage_stat_values, state, &mut rng);
 									life_leech = new_life_leech;
 									mana_leech = new_mana_leech;
+									explode_on_death = new_explode_on_death;
+									freeze_propagate_value = new_freeze_propagate_value;
+									ignite_propagate_value = new_ignite_propagate_value;
+									shock_propagate_value = new_shock_propagate_value;
 								}
 							}
 						}
@@ -3527,6 +3642,58 @@ impl Map
 									rate: mana_leech / duration * DT,
 									time_to_remove: state.time() + duration as f64,
 								});
+							}
+						}
+						if explode_on_death
+							|| freeze_propagate_value > 0.
+							|| ignite_propagate_value.active()
+							|| shock_propagate_value.active()
+						{
+							let mut center = None;
+							let mut values = None;
+
+							if let Ok(stats) = self.world.query_one_mut::<&comps::Stats>(id)
+							{
+								values = Some(stats.values.clone());
+							}
+							if let Ok((position, stats)) = self
+								.world
+								.query_one_mut::<(&comps::Position, &comps::Stats)>(
+									other_id.unwrap(),
+								)
+							{
+								if let Some(values) = values.as_mut()
+								{
+									values.physical_damage = 0.;
+									if explode_on_death
+									{
+										values.physical_damage = 0.25
+											* stats.values.max_life * (1.
+											+ values.increased_physical_damage);
+									}
+									values.cold_damage = 0.;
+									values.lightning_damage = 0.;
+									values.fire_damage = 0.;
+									values.freeze_propagate_value = freeze_propagate_value;
+									values.ignite_propagate_value = ignite_propagate_value;
+									values.shock_propagate_value = shock_propagate_value;
+									values.is_invincible = true;
+									values.cast_speed = 1.;
+								}
+								center = Some(position.pos);
+							}
+							if let (Some(pos), Some(values)) = (center, values)
+							{
+								if values.physical_damage > 0.
+									|| values.freeze_propagate_value > 0.
+									|| values.ignite_propagate_value.active()
+									|| values.shock_propagate_value.active()
+								{
+									spawn_fns.push(Box::new(move |map| {
+										//println!("{:?}", values);
+										spawn_damager(pos, values, &mut map.world)
+									}));
+								}
 							}
 						}
 					}
@@ -3550,9 +3717,10 @@ impl Map
 							.as_ref()
 							.map(|s| s.freeze_time > state.time())
 							.unwrap_or(false);
+						let exploded = stats.as_ref().map(|s| s.exploded).unwrap_or(false);
 
 						// Always leave a corpse for the player...
-						if !frozen || id == self.player
+						if (!frozen && !exploded) || id == self.player
 						{
 							if let Ok((position, appearance, velocity)) = self
 								.world
@@ -3597,11 +3765,16 @@ impl Map
 									self.camera_pos.pos.xy(),
 									1.,
 								)?;
+								let pos = position.pos.clone();
+								spawn_fns.push(Box::new(move |map| {
+									spawn_explosion(pos, "data/shatter.cfg", None, &mut map.world)
+								}));
 							}
 						}
 					}
 					(comps::Effect::SpawnSoul(crystal_id), _) =>
 					{
+						self.stats.num_elves_killed += 1;
 						let mut crystal_pos = None;
 						if let Ok((position, _)) = self
 							.world
@@ -4273,35 +4446,135 @@ impl Map
 			sprite.draw_frame(Point2::new(orb_right, orb_y), "Default", 0, state);
 		}
 
-		//if !self.inventory_shown
+		if !self.inventory_shown
+			&& self
+				.world
+				.query_one_mut::<&comps::Corpse>(self.player)
+				.is_ok()
 		{
-			state.core.draw_text(
-				state.ui_font(),
-				Color::from_rgb_f(1., 1., 1.),
-				pad + 6.,
-				pad,
-				FontAlign::Left,
-				&format!("Level: {}", self.level),
+			let center = Point2::new(
+				state.buffer_width() as f32 / 2.,
+				state.buffer_height() as f32 / 2.,
+			);
+			let mut text_y = center.y - 64.;
+
+			state.prim.draw_filled_rectangle(
+				0.,
+				0.,
+				state.buffer_width(),
+				state.buffer_height(),
+				Color::from_rgba_f(0., 0., 0., 0.75),
 			);
 
-			let num_crystals_left = self.tiles.crystals.len() as i32 - self.num_crystals_done;
-			let text = if num_crystals_left > 0
-			{
-				format!("Crystals: {}", num_crystals_left)
-			}
-			else
-			{
-				"Exit open!".to_string()
-			};
+			state.core.draw_text(
+				state.ui_font(),
+				Color::from_rgb_f(1., 0.2, 0.2),
+				center.x,
+				text_y,
+				FontAlign::Centre,
+				&"You Died",
+			);
+			text_y += lh;
+			text_y += lh;
+
 			state.core.draw_text(
 				state.ui_font(),
 				Color::from_rgb_f(1., 1., 1.),
-				state.buffer_width() - pad - 6.,
-				pad,
-				FontAlign::Right,
-				&text,
+				center.x,
+				text_y,
+				FontAlign::Centre,
+				&format!("You Reached {}m High", self.level * 50),
+			);
+			text_y += lh;
+
+			state.core.draw_text(
+				state.ui_font(),
+				Color::from_rgb_f(1., 1., 1.),
+				center.x,
+				text_y,
+				FontAlign::Centre,
+				&format!("You Killed {} Elves", self.stats.num_elves_killed),
+			);
+			text_y += lh;
+
+			state.core.draw_text(
+				state.ui_font(),
+				Color::from_rgb_f(1., 1., 1.),
+				center.x,
+				text_y,
+				FontAlign::Centre,
+				&format!("You Broke {} Crystals", self.stats.num_crystals_done),
+			);
+			text_y += lh;
+
+			state.core.draw_text(
+				state.ui_font(),
+				Color::from_rgb_f(1., 1., 1.),
+				center.x,
+				text_y,
+				FontAlign::Centre,
+				&format!("You Evoked {} Blades", self.stats.num_blades_cast),
+			);
+			text_y += lh;
+
+			state.core.draw_text(
+				state.ui_font(),
+				Color::from_rgb_f(1., 1., 1.),
+				center.x,
+				text_y,
+				FontAlign::Centre,
+				&format!(
+					"You Fell {} {}",
+					self.stats.num_resets,
+					if self.stats.num_resets == 1
+					{
+						"Time"
+					}
+					else
+					{
+						"Times"
+					}
+				),
+			);
+			text_y += lh;
+			text_y += lh;
+
+			state.core.draw_text(
+				state.ui_font(),
+				Color::from_rgb_f(1., 0.2, 0.2),
+				center.x,
+				text_y,
+				FontAlign::Centre,
+				&format!("You Did Not Reach the Top of the Tree"),
 			);
 		}
+
+		state.core.draw_text(
+			state.ui_font(),
+			Color::from_rgb_f(1., 1., 1.),
+			pad + 6.,
+			pad,
+			FontAlign::Left,
+			&format!("Height: {}m", self.level * 50),
+		);
+
+		let num_crystals_left = self.tiles.crystals.len() as i32 - self.num_crystals_done;
+		let text = if num_crystals_left > 0
+		{
+			format!("Crystals: {}", num_crystals_left)
+		}
+		else
+		{
+			"Exit open!".to_string()
+		};
+		state.core.draw_text(
+			state.ui_font(),
+			Color::from_rgb_f(1., 1., 1.),
+			state.buffer_width() - pad - 6.,
+			pad,
+			FontAlign::Right,
+			&text,
+		);
 
 		Ok(())
 	}

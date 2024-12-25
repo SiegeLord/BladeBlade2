@@ -214,11 +214,12 @@ impl Sprite
 
 	pub fn advance_state(&self, state: &mut AnimationState, amount: f64)
 	{
+		state.num_activations = 0;
+		state.num_loops = 0;
 		if state.animation_name != state.new_animation_name
 		{
 			state.animation_name = state.new_animation_name.clone();
 			state.frame_idx = 0;
-			state.num_activations = 0;
 		}
 		let animation_desc = &self
 			.desc
@@ -251,8 +252,8 @@ pub struct AnimationState
 	animation_name: String,
 	new_animation_name: String,
 	frame_progress: f64,
-	frame_idx: i32,
-	num_activations: i32,
+	pub frame_idx: i32,
+	pub num_activations: i32,
 	num_loops: i32,
 }
 
@@ -275,17 +276,13 @@ impl AnimationState
 		self.new_animation_name = animation_name.into();
 	}
 
-	pub fn drain_activations(&mut self) -> i32
+	pub fn get_num_activations(&mut self) -> i32
 	{
-		let res = self.num_activations;
-		self.num_activations = 0;
-		res
+		self.num_activations
 	}
 
-	pub fn drain_loops(&mut self) -> i32
+	pub fn get_num_loops(&mut self) -> i32
 	{
-		let res = self.num_loops;
-		self.num_loops = 0;
-		res
+		self.num_loops
 	}
 }
