@@ -900,7 +900,7 @@ impl Story
 
 		let story = [
 			"For too long the ELVES have imposed arbitrary restriction ",
-			"on who gets what presents. Why do the the poor get tawdry",
+			"on who gets what presents. Why do the poor get tawdry",
 			"rubbish? Why do the rich get resplendent treasure? This ",
 			"separation is wrong.",
 			"",

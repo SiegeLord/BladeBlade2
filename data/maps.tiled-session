@@ -3,7 +3,7 @@
         "height": 4300,
         "width": 2
     },
-    "activeFile": "map_4.tmx",
+    "activeFile": "map_3.tmx",
     "expandedProjectPaths": [
         "."
     ],
@@ -50,11 +50,11 @@
             "expandedObjectLayers": [
                 2
             ],
-            "scale": 1,
+            "scale": 2,
             "selectedLayer": 1,
             "viewCenter": {
-                "x": 1133,
-                "y": 1001
+                "x": 1135.5,
+                "y": 824
             }
         },
         "map_4.tmx": {
@@ -121,8 +121,8 @@
         "map_0.tmx",
         "map_1.tmx",
         "map_2.tmx",
-        "map_3.tmx",
-        "map_4.tmx"
+        "map_4.tmx",
+        "map_3.tmx"
     ],
     "tileset.embedInMap": false,
     "tileset.lastUsedFormat": "tsx",

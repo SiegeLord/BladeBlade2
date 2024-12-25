@@ -86,8 +86,8 @@ fn real_main() -> Result<()>
 
 	let mut quit = false;
 
-	//let mut cur_screen = Screen::Menu(menu::Menu::new(&mut state)?);
-	let mut cur_screen = Screen::Game(game::Game::new(&mut state)?);
+	let mut cur_screen = Screen::Menu(menu::Menu::new(&mut state)?);
+	//let mut cur_screen = Screen::Game(game::Game::new(&mut state)?);
 
 	let mut logics_without_draw = 0;
 	let mut old_fullscreen = state.options.fullscreen;
@@ -101,7 +101,7 @@ fn real_main() -> Result<()>
 	{
 		state.core.grab_mouse(&display).ok();
 	}
-	//display.show_cursor(false).ok();
+	display.show_cursor(false).ok();
 
 	timer.start();
 	while !quit
@@ -222,7 +222,7 @@ fn real_main() -> Result<()>
 				{
 					state.core.grab_mouse(&display).ok();
 				}
-				//display.show_cursor(false).ok();
+				display.show_cursor(false).ok();
 				state.track_mouse = true;
 			}
 			Event::DisplaySwitchOut { .. } =>
@@ -231,7 +231,7 @@ fn real_main() -> Result<()>
 				{
 					state.core.ungrab_mouse().ok();
 				}
-				//display.show_cursor(true).ok();
+				display.show_cursor(true).ok();
 				state.track_mouse = false;
 			}
 			Event::MouseButtonDown { .. } =>
@@ -240,7 +240,7 @@ fn real_main() -> Result<()>
 				{
 					state.core.grab_mouse(&display).ok();
 				}
-				//display.show_cursor(false).ok();
+				display.show_cursor(false).ok();
 				state.track_mouse = true;
 			}
 			Event::TimerTick { .. } =>
