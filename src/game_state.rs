@@ -27,6 +27,7 @@ pub struct Options
 	pub grab_mouse: bool,
 	pub ui_scale: f32,
 	pub frac_scale: bool,
+	pub ray_casting_steps: i32,
 
 	pub controls: controls::Controls,
 }
@@ -47,6 +48,7 @@ impl Default for Options
 			grab_mouse: false,
 			ui_scale: 1.,
 			frac_scale: true,
+			ray_casting_steps: 16,
 			controls: controls::Controls::new(),
 		}
 	}
@@ -511,7 +513,10 @@ pub fn light_pass(state: &GameState) -> Option<&Bitmap>
 				.core
 				.set_shader_uniform("last_index", &[(i == last_idx) as i32][..])
 				.ok();
-			state.core.set_shader_uniform("num_steps", &[32][..]).ok();
+			state
+				.core
+				.set_shader_uniform("num_steps", &[state.options.ray_casting_steps][..])
+				.ok();
 			state
 				.core
 				.draw_bitmap(state.light_buffer.as_ref().unwrap(), 0., 0., Flag::zero());

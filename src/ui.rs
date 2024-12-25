@@ -32,7 +32,7 @@ pub enum Action
 	UiScale(f32),
 	MusicVolume(f32),
 	SfxVolume(f32),
-	CameraSpeed(i32),
+	RayCastingSteps(i32),
 }
 
 #[derive(Clone)]
@@ -1196,16 +1196,28 @@ impl OptionsMenu
 			//		|i| Action::UiScale(i),
 			//	)),
 			//],
+			//vec![
+			//	Widget::Label(Label::new(w, h, "Scroll")),
+			//	Widget::Slider(Slider::new(
+			//		w,
+			//		h,
+			//		state.options.camera_speed as f32,
+			//		1.,
+			//		10.,
+			//		1.,
+			//		|i| Action::CameraSpeed(i as i32),
+			//	)),
+			//],
 			vec![
-				Widget::Label(Label::new(w, h, "Scroll")),
+				Widget::Label(Label::new(w, h, "Ray Casting Steps")),
 				Widget::Slider(Slider::new(
 					w,
 					h,
-					state.options.camera_speed as f32,
+					state.options.ray_casting_steps as f32,
+					4.,
+					32.,
 					1.,
-					10.,
-					1.,
-					|i| Action::CameraSpeed(i as i32),
+					|i| Action::RayCastingSteps(i as i32),
 				)),
 			],
 			vec![Widget::Button(Button::new(w, h, "Back", Action::Back))],
@@ -1243,9 +1255,9 @@ impl OptionsMenu
 					state.options.music_volume = v;
 					state.sfx.set_music_volume(v);
 				}
-				Action::CameraSpeed(i) =>
+				Action::RayCastingSteps(i) =>
 				{
-					state.options.camera_speed = i;
+					state.options.ray_casting_steps = i;
 				}
 				Action::SfxVolume(v) =>
 				{
