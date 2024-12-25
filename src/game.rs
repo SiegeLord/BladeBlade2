@@ -4605,7 +4605,7 @@ impl Map
 				center.x,
 				text_y,
 				FontAlign::Centre,
-				&format!("You Did Not Reach the Top of the Tree"),
+				&format!("You Did Not Reach the Top of the Fir Tree"),
 			);
 		}
 
