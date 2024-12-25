@@ -3,7 +3,7 @@
         "height": 4300,
         "width": 2
     },
-    "activeFile": "test.tmx",
+    "activeFile": "map_4.tmx",
     "expandedProjectPaths": [
         "."
     ],
@@ -13,6 +13,61 @@
             "scaleInDock": 1,
             "scaleInEditor": 2
         },
+        "map_0.tmx": {
+            "expandedObjectLayers": [
+                2
+            ],
+            "scale": 0.75,
+            "selectedLayer": 1,
+            "viewCenter": {
+                "x": 512,
+                "y": 512
+            }
+        },
+        "map_1.tmx": {
+            "expandedObjectLayers": [
+                2
+            ],
+            "scale": 0.75,
+            "selectedLayer": 1,
+            "viewCenter": {
+                "x": 1024,
+                "y": 1024
+            }
+        },
+        "map_2.tmx": {
+            "expandedObjectLayers": [
+                2
+            ],
+            "scale": 1,
+            "selectedLayer": 1,
+            "viewCenter": {
+                "x": 1060,
+                "y": 1310
+            }
+        },
+        "map_3.tmx": {
+            "expandedObjectLayers": [
+                2
+            ],
+            "scale": 1,
+            "selectedLayer": 1,
+            "viewCenter": {
+                "x": 1133,
+                "y": 1001
+            }
+        },
+        "map_4.tmx": {
+            "expandedObjectLayers": [
+                2
+            ],
+            "scale": 1,
+            "selectedLayer": 1,
+            "viewCenter": {
+                "x": 880,
+                "y": 354
+            }
+        },
         "test.tmx": {
             "expandedObjectLayers": [
                 2
@@ -20,8 +75,8 @@
             "scale": 1.5,
             "selectedLayer": 1,
             "viewCenter": {
-                "x": 263.33333333333326,
-                "y": 328
+                "x": 256,
+                "y": 256
             }
         },
         "tree.tmx": {
@@ -38,26 +93,36 @@
         }
     },
     "last.imagePath": "/home/siege/Projects/BladeBlade2/data",
-    "map.fixedSize": false,
-    "map.height": 32,
+    "map.fixedSize": true,
+    "map.height": 64,
     "map.lastUsedFormat": "tmx",
     "map.orientation": 1,
     "map.tileHeight": 32,
     "map.tileWidth": 32,
-    "map.width": 32,
+    "map.width": 64,
     "openFiles": [
-        "test.tmx",
         "Terrain.tsx",
         "tree.tsx",
-        "tree.tmx"
+        "tree.tmx",
+        "test.tmx",
+        "map_0.tmx",
+        "map_1.tmx",
+        "map_2.tmx",
+        "map_3.tmx",
+        "map_4.tmx"
     ],
     "project": "maps.tiled-project",
     "property.type": "object",
     "recentFiles": [
-        "tree.tmx",
-        "tree.tsx",
         "Terrain.tsx",
-        "test.tmx"
+        "tree.tsx",
+        "tree.tmx",
+        "test.tmx",
+        "map_0.tmx",
+        "map_1.tmx",
+        "map_2.tmx",
+        "map_3.tmx",
+        "map_4.tmx"
     ],
     "tileset.embedInMap": false,
     "tileset.lastUsedFormat": "tsx",

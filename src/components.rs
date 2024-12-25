@@ -432,7 +432,7 @@ impl StatValues
 	pub fn new_player() -> Self
 	{
 		Self {
-			speed: 128.,
+			speed: 136.,
 			acceleration: 512.,
 			jump_strength: 128.,
 			team: Team::Player,
@@ -442,7 +442,7 @@ impl StatValues
 			max_mana: 100.,
 			mana_regen: 5.,
 
-			area_of_effect: 2.,
+			area_of_effect: 1.,
 			cast_speed: 1.,
 			skill_duration: 1.,
 
@@ -454,11 +454,11 @@ impl StatValues
 			//ignite_propagate: true,
 			//shock_propagate: true,
 			//explode_on_death: true,
-			fire_damage: 10.,
+			//fire_damage: 10.,
 			//chance_to_ignite: 1.,
-			lightning_damage: 10.,
+			//lightning_damage: 10.,
 			//chance_to_shock: 1.,
-			cold_damage: 10.,
+			//cold_damage: 10.,
 			//chance_to_freeze: 1.,
 			..Self::default()
 		}
@@ -709,11 +709,11 @@ impl Stats
 
 			self.values.physical_resistance = utils::min(0.9, self.values.physical_resistance);
 			self.values.cold_resistance =
-				utils::clamp(self.values.cold_resistance - penalty * 0.1, -1., 0.75);
+				utils::clamp(self.values.cold_resistance - penalty * 0.05, -1., 0.75);
 			self.values.fire_resistance =
-				utils::clamp(self.values.fire_resistance - penalty * 0.1, -1., 0.75);
+				utils::clamp(self.values.fire_resistance - penalty * 0.05, -1., 0.75);
 			self.values.lightning_resistance =
-				utils::clamp(self.values.lightning_resistance - penalty * 0.1, -1., 0.75);
+				utils::clamp(self.values.lightning_resistance - penalty * 0.05, -1., 0.75);
 
 			self.values.chance_to_shock = utils::min(1., self.values.chance_to_shock);
 			self.values.chance_to_ignite = utils::min(1., self.values.chance_to_ignite);
@@ -1217,10 +1217,10 @@ impl ItemPrefix
 			ItemPrefix::Life => (20., 1.),
 			ItemPrefix::LifeRegen => (1., 1.),
 			ItemPrefix::AddedPhysicalDamage => (2., 1.),
-			ItemPrefix::AddedColdDamage => (5., 1.),
-			ItemPrefix::AddedFireDamage => (5., 1.),
-			ItemPrefix::AddedLightningDamage => (5., 1.),
-			ItemPrefix::CriticalChance => (0.05, 0.01),
+			ItemPrefix::AddedColdDamage => (2., 1.),
+			ItemPrefix::AddedFireDamage => (2., 1.),
+			ItemPrefix::AddedLightningDamage => (2., 1.),
+			ItemPrefix::CriticalChance => (0.07, 0.01),
 			ItemPrefix::ChanceToFreeze => (0.01, 0.01),
 			ItemPrefix::ChanceToIgnite => (0.01, 0.01),
 			ItemPrefix::ChanceToShock => (0.01, 0.01),
@@ -1437,11 +1437,11 @@ impl ItemSuffix
 		let tier = tier as f32;
 		let (delta, mult) = match self
 		{
-			ItemSuffix::Armour => (100., 1.),
+			ItemSuffix::Armour => (10., 1.),
 			ItemSuffix::PhysicalResistance => (0.01, 0.01),
-			ItemSuffix::ColdResistance => (0.05, 0.01),
-			ItemSuffix::FireResistance => (0.05, 0.01),
-			ItemSuffix::LightningResistance => (0.05, 0.01),
+			ItemSuffix::ColdResistance => (0.1, 0.01),
+			ItemSuffix::FireResistance => (0.1, 0.01),
+			ItemSuffix::LightningResistance => (0.1, 0.01),
 			ItemSuffix::CriticalMultiplier => (0.05, 0.01),
 			ItemSuffix::IncreasedPhysicalDamage => (0.05, 0.01),
 			ItemSuffix::IncreasedColdDamage => (0.10, 0.01),
@@ -1634,14 +1634,14 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 {
 	let rarity_weights = match crystal_level
 	{
-		0 => (50, 5, 0),
-		1 => (40, 5, 0),
-		2 => (30, 5, 0),
-		3 => (20, 50, 0),
-		4 => (100, 50, 2),
-		5 => (100, 50, 3),
-		6 => (100, 50, 4),
-		7 => (100, 50, 5),
+		0 => (50, 5, 1),
+		1 => (40, 5, 1),
+		2 => (30, 5, 1),
+		3 => (20, 50, 2),
+		4 => (100, 50, 5),
+		5 => (100, 50, 7),
+		6 => (100, 50, 8),
+		7 => (100, 50, 9),
 		_ => unreachable!(),
 	};
 
@@ -1743,7 +1743,7 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 	];
 
 	let blue_suffix_weights = [
-		(ItemSuffix::Armour, 1000),
+		(ItemSuffix::Armour, 1500),
 		(ItemSuffix::PhysicalResistance, 100),
 		(ItemSuffix::ColdResistance, 1000),
 		(ItemSuffix::FireResistance, 500),

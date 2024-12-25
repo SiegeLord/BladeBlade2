@@ -7,16 +7,16 @@ authors = ["SiegeLord <slabode@aim.com>"]
 
 [dependencies]
 
-#allegro-sys = { version="0.0.46" }
-#allegro = { version="0.0.46" }
-#allegro_dialog = { version="0.0.46" }
-#allegro_image = { version="0.0.46" }
-#allegro_font = { version="0.0.46" }
-#allegro_ttf = { version="0.0.46" }
-#allegro_acodec = { version="0.0.46" }
-#allegro_audio = { version="0.0.46" }
-#allegro_primitives = { version="0.0.46" }
-#allegro_color = { version="0.0.46" }
+#allegro-sys = { version="0.0.47" }
+#allegro = { version="0.0.47" }
+#allegro_dialog = { version="0.0.47" }
+#allegro_image = { version="0.0.47" }
+#allegro_font = { version="0.0.47" }
+#allegro_ttf = { version="0.0.47" }
+#allegro_acodec = { version="0.0.47" }
+#allegro_audio = { version="0.0.47" }
+#allegro_primitives = { version="0.0.47" }
+#allegro_color = { version="0.0.47" }
 
 allegro-sys = { path = "/home/siege/Projects/RustAllegro/allegro-sys" }
 allegro = { path = "/home/siege/Projects/RustAllegro/allegro" }
@@ -32,17 +32,14 @@ allegro_color = { path = "/home/siege/Projects/RustAllegro/allegro_color" }
 bimap = { version="0.6.2", features = ["serde"] }
 hecs = "0.10.5"
 slr_config = "0.0.22"
-#slr_config = { path = "/home/siege/Projects/SLRConfig/slr_config" }
 nalgebra = "0.31.1"
 rand = "0.8.5"
 serde = "1.0.142"
 serde_derive = "1.0.142"
-gltf = "1.0.0"
 tiled = "0.13.0"
-gl = "0.14.0"
-gl_loader = "0.1.2"
 rect_packer = "0.2.1"
 memoffset = "0.9"
+glob = "0.3.1"
 
 [profile.release]
 debug = true

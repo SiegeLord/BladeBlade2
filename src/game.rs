@@ -48,6 +48,7 @@ pub struct Game
 	map: Map,
 	subscreens: ui::SubScreens,
 	inventory_screen: Option<InventoryScreen>,
+	map_files: Vec<String>,
 }
 
 impl Game
@@ -110,10 +111,30 @@ impl Game
 		state.cache_sprite("data/orb_small.cfg")?;
 		state.cache_sprite("data/orb_big.cfg")?;
 
+		let mut map_files = vec![];
+		for entry in glob::glob("data/map_*.tmx").unwrap()
+		{
+			if let Ok(path) = entry
+			{
+				map_files.push(path.to_string_lossy().to_string());
+			}
+		}
+		if map_files.is_empty()
+		{
+			return Err("No maps found!".to_string().into());
+		}
+
 		Ok(Self {
-			map: Map::new(comps::Inventory::new(), 1, GameStats::new(), state)?,
+			map: Map::new(
+				comps::Inventory::new(),
+				"data/map_3.tmx",
+				1,
+				GameStats::new(),
+				state,
+			)?,
 			subscreens: ui::SubScreens::new(state),
 			inventory_screen: None,
+			map_files: map_files,
 		})
 	}
 
@@ -155,13 +176,29 @@ impl Game
 		{
 			if advance
 			{
-				let inventory = (&*self
-					.map
-					.world
-					.get::<&comps::Inventory>(self.map.player)
-					.unwrap())
-					.clone();
-				self.map = Map::new(inventory, self.map.level + 1, self.map.stats, state)?;
+				let mut rng = thread_rng();
+				loop
+				{
+					let new_map_file = self.map_files.choose(&mut rng).unwrap();
+					if *new_map_file == self.map.map_file
+					{
+						continue;
+					}
+					let inventory = (&*self
+						.map
+						.world
+						.get::<&comps::Inventory>(self.map.player)
+						.unwrap())
+						.clone();
+					self.map = Map::new(
+						inventory,
+						&new_map_file,
+						self.map.level + 1,
+						self.map.stats,
+						state,
+					)?;
+					break;
+				}
 			}
 		}
 
@@ -1122,12 +1159,12 @@ impl Scene
 }
 
 fn spawn_platform(
-	waypoints: Vec<(Point2<f32>, f64)>, world: &mut hecs::World,
+	pos: Point3<f32>, waypoints: Vec<(Point2<f32>, f64)>, world: &mut hecs::World,
 ) -> Result<hecs::Entity>
 {
 	let entity = world.spawn((
 		comps::Appearance::new_with_bias("data/platform.cfg", -48),
-		comps::Position::new(Point3::new(waypoints[0].0.x, waypoints[0].0.y, 0.)),
+		comps::Position::new(pos),
 		comps::Velocity::new(Vector3::zeros()),
 		comps::Solid {
 			size: 48.,
@@ -1291,7 +1328,7 @@ fn spawn_enemy(
 	let mut inventory = comps::Inventory::new();
 	let mut effects = vec![];
 	let mut inventory_idx = 0;
-	let item_level = (level as f32 * (1.1_f32).powf((level - 1) as f32)) as i32;
+	let item_level = (1.1 * level as f32 + (1.1_f32).powf((level - 1) as f32)) as i32;
 	for affix in &affixes
 	{
 		match affix
@@ -1524,9 +1561,9 @@ fn spawn_from_crystal(
 		vals = Some((position.pos, crystal.level));
 	}
 
-	let count = if let Some((pos, crystal_level)) = vals
+	let count = if let Some((pos, _crystal_level)) = vals
 	{
-		let mut count = 3 + crystal_level;
+		let mut count = 3;
 
 		let weights = if level > 4
 		{
@@ -1914,7 +1951,7 @@ struct Tiles
 	height: i32,
 	start: Option<Point2<f32>>,
 	exit: Option<Point2<f32>>,
-	platforms: Vec<Vec<(Point2<f32>, f64)>>,
+	platforms: Vec<(Point2<f32>, Vec<(Point2<f32>, f64)>)>,
 	crystals: Vec<Point2<f32>>,
 	doodads: Vec<Point2<f32>>,
 	sprite: String,
@@ -1982,14 +2019,17 @@ impl Tiles
 									if let Some(waypoint_id) =
 										get_object_property(&format!("waypoint_{i}"), &object)?
 									{
-										waypoint_ids.push(waypoint_id);
+										if waypoint_id > 0
+										{
+											waypoint_ids.push(waypoint_id);
+										}
 									}
 									else
 									{
 										break;
 									}
 								}
-								platforms.push(waypoint_ids);
+								platforms.push((get_object_center(&object)?, waypoint_ids));
 							}
 							_ => (),
 						}
@@ -2018,14 +2058,18 @@ impl Tiles
 		}
 
 		let mut resolved_platforms = vec![];
-		for waypoint_ids in platforms
+		for (start, waypoint_ids) in platforms
 		{
 			let mut resolved_waypoints = vec![];
 			for waypoint_id in waypoint_ids
 			{
-				resolved_waypoints.push(waypoints[&waypoint_id]);
+				resolved_waypoints.push(
+					*waypoints
+						.get(&waypoint_id)
+						.expect(&format!("Waypoint {waypoint_id} not found")),
+				);
 			}
-			resolved_platforms.push(resolved_waypoints);
+			resolved_platforms.push((start, resolved_waypoints));
 		}
 
 		Ok(Self {
@@ -2202,23 +2246,28 @@ struct Map
 	crystal_seed: u64,
 	time_to_next_map: Option<f64>,
 	stats: GameStats,
+	map_file: String,
 }
 
 impl Map
 {
 	fn new(
-		inventory: comps::Inventory, level: i32, stats: GameStats,
+		inventory: comps::Inventory, map_file: &str, level: i32, stats: GameStats,
 		_state: &mut game_state::GameState,
 	) -> Result<Self>
 	{
 		let mut world = hecs::World::new();
 
-		let tiles = Tiles::new("data/test.tmx", "data/terrain.cfg")?;
+		let tiles = Tiles::new(map_file, "data/terrain.cfg")?;
 		let bkg_tiles = Tiles::new("data/tree.tmx", "data/tree.cfg")?;
 
-		for waypoints in &tiles.platforms
+		for (start, waypoints) in &tiles.platforms
 		{
-			spawn_platform(waypoints.clone(), &mut world)?;
+			spawn_platform(
+				Point3::new(start.x, start.y, 0.),
+				waypoints.clone(),
+				&mut world,
+			)?;
 		}
 
 		for pos in &tiles.doodads
@@ -2228,7 +2277,10 @@ impl Map
 
 		let mut rng = thread_rng();
 
-		let start = tiles.start.unwrap();
+		tiles.exit.expect(&format!("No exit in map: {}!", map_file));
+		let start = tiles
+			.start
+			.expect(&format!("No start in map: {}!", map_file));
 		let spawn_pos = Point3::new(start.x, start.y, 0.);
 		let player = spawn_player(spawn_pos, inventory, &mut world)?;
 		let crystal_seed = rng.gen::<u64>();
@@ -2249,6 +2301,7 @@ impl Map
 			num_crystals_done: 0,
 			time_to_next_map: None,
 			stats: stats,
+			map_file: map_file.to_string(),
 		})
 	}
 
@@ -2542,7 +2595,7 @@ impl Map
 			.iter()
 		{
 			let want_move = controller.want_move;
-			let mut air_control = 0.5;
+			let mut air_control = 0.6;
 			if position.pos.z == 0.
 			{
 				air_control = 1.;
@@ -2802,7 +2855,14 @@ impl Map
 			{
 				for _ in 0..appearance.animation_state.get_num_activations()
 				{
-					let mana_cost = 5. + self.level as f32 * 3.;
+					let mana_cost = if id == self.player
+					{
+						5. + self.level as f32 * 2.
+					}
+					else
+					{
+						0.
+					};
 					if mana_cost <= stats.mana
 					{
 						stats.mana -= mana_cost;
