@@ -793,8 +793,7 @@ impl Stats
 		if values.cold_damage > 0. && (crit || rng.gen_bool(values.chance_to_freeze as f64))
 		{
 			freeze_duration = 10.
-				* damage_mult
-				* values.skill_duration
+				* damage_mult * values.skill_duration
 				* values.cold_damage
 				* (1. - self.values.cold_resistance)
 				/ self.values.max_life;

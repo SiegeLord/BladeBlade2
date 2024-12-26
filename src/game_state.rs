@@ -41,7 +41,7 @@ impl Default for Options
 			width: 960,
 			height: 864,
 			play_music: true,
-			vsync_method: 2,
+			vsync_method: if cfg!(target_os = "windows") { 1 } else { 2 },
 			sfx_volume: 1.,
 			music_volume: 1.,
 			camera_speed: 4,

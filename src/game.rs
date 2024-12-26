@@ -2601,8 +2601,7 @@ impl Map
 				air_control = 1.;
 			}
 			acceleration.pos = Vector3::new(want_move.x, want_move.y, 0.)
-				* air_control
-				* stats.values.acceleration;
+				* air_control * stats.values.acceleration;
 		}
 
 		for (id, (position, velocity, stats, jump, affected_by_gravity, controller)) in self
