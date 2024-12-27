@@ -466,27 +466,26 @@ impl StatValues
 
 	pub fn new_enemy(level: i32, rarity: Rarity, ranged: bool) -> Self
 	{
-		let f = 1.1_f32.powf(level as f32)
-			* match rarity
-			{
-				Rarity::Normal => 1.,
-				Rarity::Magic => 1.5,
-				Rarity::Rare => 3.,
-				Rarity::Unique => 10.,
-			};
+		let f = match rarity
+		{
+			Rarity::Normal => 1.,
+			Rarity::Magic => 1.5,
+			Rarity::Rare => 3.,
+			Rarity::Unique => 10.,
+		};
 
 		Self {
 			speed: if ranged { 64. } else { 96. },
 			acceleration: if ranged { 512. } else { 1400. },
 			skill_duration: 1.,
-			max_life: (42. + 10. * level as f32) * f,
+			max_life: (42. + 10. * level as f32) * 1.1_f32.powf(level as f32),
 			mana_regen: 100.,
 			max_mana: 100.,
 			cast_speed: 1.,
 			critical_chance: 0.05,
 			critical_multiplier: 1.5,
 
-			physical_damage: (3. + 1.5 * level as f32) * f,
+			physical_damage: (-7. + 0. * level as f32 + 10. * 1.1_f32.powf(level as f32)) * f,
 
 			area_of_effect: 1.,
 			..Self::default()
@@ -1438,7 +1437,7 @@ impl ItemSuffix
 		let tier = tier as f32;
 		let (delta, mult) = match self
 		{
-			ItemSuffix::Armour => (10., 1.),
+			ItemSuffix::Armour => (5., 1.),
 			ItemSuffix::PhysicalResistance => (0.01, 0.01),
 			ItemSuffix::ColdResistance => (0.1, 0.01),
 			ItemSuffix::FireResistance => (0.1, 0.01),

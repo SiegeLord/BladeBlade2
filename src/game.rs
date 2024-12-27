@@ -1381,7 +1381,7 @@ fn spawn_enemy(
 	let mut inventory = comps::Inventory::new();
 	let mut effects = vec![];
 	let mut inventory_idx = 0;
-	let item_level = (1.1 * level as f32 + (1.1_f32).powf((level - 1) as f32)) as i32;
+	let item_level = (-9. + 0. * level as f32 + 10. * (1.1_f32).powf(level as f32)) as i32;
 	for affix in &affixes
 	{
 		match affix
@@ -1404,7 +1404,7 @@ fn spawn_enemy(
 						),
 						(comps::ItemPrefix::ChanceToFreeze, 50, 1.),
 					],
-					suffixes: vec![(comps::ItemSuffix::ColdResistance, 10, 1.)],
+					suffixes: vec![(comps::ItemSuffix::ColdResistance, 5, 1.)],
 				});
 				inventory_idx += 1;
 			}
@@ -1426,7 +1426,7 @@ fn spawn_enemy(
 						),
 						(comps::ItemPrefix::ChanceToIgnite, 50, 1.),
 					],
-					suffixes: vec![(comps::ItemSuffix::FireResistance, 10, 1.)],
+					suffixes: vec![(comps::ItemSuffix::FireResistance, 5, 1.)],
 				});
 				inventory_idx += 1;
 			}
@@ -1448,7 +1448,7 @@ fn spawn_enemy(
 						),
 						(comps::ItemPrefix::ChanceToShock, 50, 1.),
 					],
-					suffixes: vec![(comps::ItemSuffix::LightningResistance, 10, 1.)],
+					suffixes: vec![(comps::ItemSuffix::LightningResistance, 5, 1.)],
 				});
 				inventory_idx += 1;
 			}
