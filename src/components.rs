@@ -466,26 +466,27 @@ impl StatValues
 
 	pub fn new_enemy(level: i32, rarity: Rarity, ranged: bool) -> Self
 	{
-		let f = match rarity
-		{
-			Rarity::Normal => 1.,
-			Rarity::Magic => 1.5,
-			Rarity::Rare => 3.,
-			Rarity::Unique => 10.,
-		};
+		let f = 1.1_f32.powf(level as f32)
+			* match rarity
+			{
+				Rarity::Normal => 1.,
+				Rarity::Magic => 1.5,
+				Rarity::Rare => 3.,
+				Rarity::Unique => 10.,
+			};
 
 		Self {
 			speed: if ranged { 64. } else { 96. },
-			acceleration: 1024.,
+			acceleration: if ranged { 512. } else { 1400. },
 			skill_duration: 1.,
-			max_life: (50. + 15. * level as f32) * f,
+			max_life: (42. + 10. * level as f32) * f,
 			mana_regen: 100.,
 			max_mana: 100.,
 			cast_speed: 1.,
 			critical_chance: 0.05,
 			critical_multiplier: 1.5,
 
-			physical_damage: (3. + 3. * level as f32) * f,
+			physical_damage: (3. + 1.5 * level as f32) * f,
 
 			area_of_effect: 1.,
 			..Self::default()
@@ -709,11 +710,11 @@ impl Stats
 
 			self.values.physical_resistance = utils::min(0.9, self.values.physical_resistance);
 			self.values.cold_resistance =
-				utils::clamp(self.values.cold_resistance - penalty * 0.05, -1., 0.75);
+				utils::clamp(self.values.cold_resistance - penalty * 0.3, -1., 0.75);
 			self.values.fire_resistance =
-				utils::clamp(self.values.fire_resistance - penalty * 0.05, -1., 0.75);
+				utils::clamp(self.values.fire_resistance - penalty * 0.3, -1., 0.75);
 			self.values.lightning_resistance =
-				utils::clamp(self.values.lightning_resistance - penalty * 0.05, -1., 0.75);
+				utils::clamp(self.values.lightning_resistance - penalty * 0.3, -1., 0.75);
 
 			self.values.chance_to_shock = utils::min(1., self.values.chance_to_shock);
 			self.values.chance_to_ignite = utils::min(1., self.values.chance_to_ignite);
@@ -1219,13 +1220,13 @@ impl ItemPrefix
 			ItemPrefix::AddedColdDamage => (2., 1.),
 			ItemPrefix::AddedFireDamage => (2., 1.),
 			ItemPrefix::AddedLightningDamage => (2., 1.),
-			ItemPrefix::CriticalChance => (0.07, 0.01),
-			ItemPrefix::ChanceToFreeze => (0.01, 0.01),
-			ItemPrefix::ChanceToIgnite => (0.01, 0.01),
-			ItemPrefix::ChanceToShock => (0.01, 0.01),
+			ItemPrefix::CriticalChance => (0.1, 0.01),
+			ItemPrefix::ChanceToFreeze => (0.02, 0.01),
+			ItemPrefix::ChanceToIgnite => (0.02, 0.01),
+			ItemPrefix::ChanceToShock => (0.02, 0.01),
 			ItemPrefix::Mana => (20., 1.),
 			ItemPrefix::ManaRegen => (2., 1.),
-			ItemPrefix::AreaOfEffect => (0.01, 0.01),
+			ItemPrefix::AreaOfEffect => (0.05, 0.01),
 			ItemPrefix::CastSpeed => (0.05, 0.01),
 			ItemPrefix::MoveSpeed => (0.01, 0.01),
 			ItemPrefix::MultiShot => (0.1, 0.01),
