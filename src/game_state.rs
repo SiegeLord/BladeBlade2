@@ -57,7 +57,7 @@ impl Default for Options
 #[derive(Debug)]
 pub enum NextScreen
 {
-	Game,
+	Game(bool),
 	Menu,
 	InGameMenu,
 	Quit,
@@ -110,38 +110,12 @@ pub struct GameState
 
 pub fn load_options(core: &Core) -> Result<Options>
 {
-	let mut path_buf = path::PathBuf::new();
-	if cfg!(feature = "use_user_settings")
-	{
-		path_buf.push(
-			core.get_standard_path(StandardPath::UserSettings)
-				.map_err(|_| "Couldn't get standard path".to_string())?,
-		);
-	}
-	path_buf.push("options.cfg");
-	if path_buf.exists()
-	{
-		utils::load_config(path_buf.to_str().unwrap())
-	}
-	else
-	{
-		Ok(Default::default())
-	}
+	Ok(utils::load_user_data(core, "options.cfg")?.unwrap_or_default())
 }
 
 pub fn save_options(core: &Core, options: &Options) -> Result<()>
 {
-	let mut path_buf = path::PathBuf::new();
-	if cfg!(feature = "use_user_settings")
-	{
-		path_buf.push(
-			core.get_standard_path(StandardPath::UserSettings)
-				.map_err(|_| "Couldn't get standard path".to_string())?,
-		);
-	}
-	std::fs::create_dir_all(&path_buf).map_err(|_| "Couldn't create directory".to_string())?;
-	path_buf.push("options.cfg");
-	utils::save_config(path_buf.to_str().unwrap(), &options)
+	utils::save_user_data(core, "options.cfg", options)
 }
 
 impl GameState

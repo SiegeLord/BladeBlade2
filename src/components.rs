@@ -61,7 +61,7 @@ pub struct Acceleration
 	pub pos: Vector3<f32>,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 #[repr(i32)]
 pub enum Material
 {
@@ -70,7 +70,7 @@ pub enum Material
 	Lit = 2,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Appearance
 {
 	pub sprite: String,
@@ -794,7 +794,8 @@ impl Stats
 		if values.cold_damage > 0. && (crit || rng.gen_bool(values.chance_to_freeze as f64))
 		{
 			freeze_duration = 10.
-				* damage_mult * values.skill_duration
+				* damage_mult
+				* values.skill_duration
 				* values.cold_damage
 				* (1. - self.values.cold_resistance)
 				/ self.values.max_life;
@@ -1155,7 +1156,7 @@ impl Crystal
 	}
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ItemPrefix
 {
 	Life,
@@ -1391,7 +1392,7 @@ impl ItemPrefix
 	}
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(i32)]
 pub enum ItemSuffix
 {
@@ -1551,7 +1552,7 @@ impl ItemSuffix
 	}
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Rarity
 {
 	Normal,
@@ -1560,7 +1561,7 @@ pub enum Rarity
 	Unique,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Item
 {
 	pub name: Vec<String>,
@@ -1570,7 +1571,7 @@ pub struct Item
 	pub suffixes: Vec<(ItemSuffix, i32, f32)>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Inventory
 {
 	pub slots: [Option<Item>; 9],
@@ -1596,7 +1597,7 @@ pub fn generate_unique(rng: &mut impl Rng) -> Item
 			rarity: Rarity::Unique,
 			prefixes: vec![
 				(ItemPrefix::FreezePropagate, 1, 0.),
-				(ItemPrefix::ChanceToFreeze, 50, 0.),
+				(ItemPrefix::ChanceToFreeze, 25, 0.),
 			],
 			suffixes: vec![],
 		},
@@ -1606,7 +1607,7 @@ pub fn generate_unique(rng: &mut impl Rng) -> Item
 			rarity: Rarity::Unique,
 			prefixes: vec![
 				(ItemPrefix::IgnitePropagate, 1, 0.),
-				(ItemPrefix::ChanceToIgnite, 50, 0.),
+				(ItemPrefix::ChanceToIgnite, 25, 0.),
 			],
 			suffixes: vec![],
 		},
@@ -1616,7 +1617,7 @@ pub fn generate_unique(rng: &mut impl Rng) -> Item
 			rarity: Rarity::Unique,
 			prefixes: vec![
 				(ItemPrefix::ShockPropagate, 1, 0.),
-				(ItemPrefix::ChanceToShock, 50, 0.),
+				(ItemPrefix::ChanceToShock, 25, 0.),
 			],
 			suffixes: vec![],
 		},
@@ -1998,7 +1999,6 @@ pub fn damage_sprites(values: &StatValues, rarity: Rarity) -> DamageSprites
 		values.fire_damage as i32,
 		values.cold_damage as i32,
 		values.lightning_damage as i32,
-		values.physical_damage as i32,
 	];
 	let damage_idx = if damage_vals.iter().sum::<i32>() == 0
 	{
@@ -2006,14 +2006,20 @@ pub fn damage_sprites(values: &StatValues, rarity: Rarity) -> DamageSprites
 			(values.ignite_propagate_value.effect * 100.) as i32,
 			(values.freeze_propagate_value * 100.) as i32,
 			(values.shock_propagate_value.effect * 100.) as i32,
-			0,
 		];
-		propagate_vals
-			.iter()
-			.enumerate()
-			.max_by_key(|(_, &v)| v)
-			.unwrap()
-			.0
+		if propagate_vals.iter().sum::<i32>() == 0
+		{
+			3
+		}
+		else
+		{
+			propagate_vals
+				.iter()
+				.enumerate()
+				.max_by_key(|(_, &v)| v)
+				.unwrap()
+				.0
+		}
 	}
 	else
 	{

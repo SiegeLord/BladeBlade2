@@ -13,15 +13,41 @@ use na::{
 };
 use nalgebra::{self as na, Point};
 use rand::prelude::*;
+use serde_derive::{Deserialize, Serialize};
 use tiled;
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::thread;
 
 const TILE_SIZE: f32 = 32.;
 const PI: f32 = std::f32::consts::PI;
 
-#[derive(Copy, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Save
+{
+	stats: GameStats,
+	inventory: comps::Inventory,
+	map_seed: u64,
+	map_file: String,
+	level: i32,
+}
+
+impl Save
+{
+	pub fn new(seed: u64) -> Self
+	{
+		Self {
+			stats: GameStats::new(),
+			inventory: comps::Inventory::new(),
+			map_seed: seed,
+			map_file: "data/map_3.tmx".into(),
+			level: 1,
+		}
+	}
+}
+
+#[derive(Serialize, Deserialize, Copy, Clone)]
 struct GameStats
 {
 	num_elves_killed: i32,
@@ -53,7 +79,7 @@ pub struct Game
 
 impl Game
 {
-	pub fn new(state: &mut game_state::GameState) -> Result<Self>
+	pub fn new(resume: bool, state: &mut game_state::GameState) -> Result<Self>
 	{
 		state.controls.clear_action_states();
 		state.sfx.set_music_file("data/game.ogg", 0.5);
@@ -124,12 +150,23 @@ impl Game
 			return Err("No maps found!".to_string().into());
 		}
 
+		let mut rng = thread_rng();
+		let mut save = Save::new(rng.gen());
+		if resume
+		{
+			if let Some(resumed_save) = utils::load_user_data(&state.core, "save.cfg")?
+			{
+				println!("Resuming");
+				save = resumed_save;
+			}
+		}
+
 		Ok(Self {
 			map: Map::new(
-				comps::Inventory::new(),
-				"data/map_3.tmx",
-				1,
-				GameStats::new(),
+				save.inventory,
+				&save.map_file,
+				save.level,
+				save.stats,
 				state,
 			)?,
 			subscreens: ui::SubScreens::new(state),
@@ -269,7 +306,14 @@ impl Game
 			{
 				match action
 				{
-					ui::Action::MainMenu => return Ok(Some(game_state::NextScreen::Menu)),
+					ui::Action::MainMenu =>
+					{
+						if !self.map.deleted_on_death
+						{
+							self.map.save(state)?;
+						}
+						return Ok(Some(game_state::NextScreen::Menu));
+					}
 					_ => (),
 				}
 			}
@@ -426,6 +470,14 @@ impl InventoryScreen
 		}
 		self.selection = best.0;
 
+		if map
+			.world
+			.query_one_mut::<&comps::Corpse>(map.player)
+			.is_ok()
+		{
+			do_swap = false;
+		}
+
 		if do_swap
 		{
 			let drop_item = {
@@ -459,6 +511,7 @@ impl InventoryScreen
 			if swapped
 			{
 				state.sfx.play_sound("data/inventory.ogg")?;
+				map.save(state)?;
 			}
 
 			if let Ok((inventory, stats)) = map
@@ -2208,10 +2261,10 @@ impl Tiles
 }
 
 fn spawn_crystals_from_map(
-	tiles: &Tiles, crystal_seed: u64, level: i32, rng: &mut impl Rng, world: &mut hecs::World,
+	tiles: &Tiles, map_seed: u64, level: i32, rng: &mut impl Rng, world: &mut hecs::World,
 ) -> Result<()>
 {
-	let mut crystal_rng = StdRng::seed_from_u64(crystal_seed);
+	let mut crystal_rng = StdRng::seed_from_u64(map_seed);
 	for crystal in &tiles.crystals
 	{
 		let crystal = spawn_crystal(
@@ -2243,17 +2296,18 @@ struct Map
 	inventory_shown: bool,
 	level: i32,
 	num_crystals_done: i32,
-	crystal_seed: u64,
+	map_seed: u64,
 	time_to_next_map: Option<f64>,
 	stats: GameStats,
 	map_file: String,
+	deleted_on_death: bool,
 }
 
 impl Map
 {
 	fn new(
 		inventory: comps::Inventory, map_file: &str, level: i32, stats: GameStats,
-		_state: &mut game_state::GameState,
+		state: &mut game_state::GameState,
 	) -> Result<Self>
 	{
 		let mut world = hecs::World::new();
@@ -2283,10 +2337,10 @@ impl Map
 			.expect(&format!("No start in map: {}!", map_file));
 		let spawn_pos = Point3::new(start.x, start.y, 0.);
 		let player = spawn_player(spawn_pos, inventory, &mut world)?;
-		let crystal_seed = rng.gen::<u64>();
-		spawn_crystals_from_map(&tiles, crystal_seed, level, &mut rng, &mut world)?;
+		let map_seed = rng.gen::<u64>();
+		spawn_crystals_from_map(&tiles, map_seed, level, &mut rng, &mut world)?;
 
-		Ok(Self {
+		let map = Self {
 			world: world,
 			player: player,
 			tiles: tiles,
@@ -2297,12 +2351,28 @@ impl Map
 			nearby_item: None,
 			inventory_shown: false,
 			level: level,
-			crystal_seed: crystal_seed,
+			map_seed: map_seed,
 			num_crystals_done: 0,
 			time_to_next_map: None,
 			stats: stats,
 			map_file: map_file.to_string(),
-		})
+			deleted_on_death: false,
+		};
+		map.save(state)?;
+		Ok(map)
+	}
+
+	fn save(&self, state: &game_state::GameState) -> Result<()>
+	{
+		let save = Save {
+			level: self.level,
+			map_seed: self.map_seed,
+			map_file: self.map_file.clone(),
+			stats: self.stats,
+			inventory: (&*self.world.get::<&comps::Inventory>(self.player)?).clone(),
+		};
+		println!("Saving");
+		utils::save_user_data(&state.core, "save.cfg", &save)
 	}
 
 	fn camera_to_world(&self, pos: Point2<f32>, state: &game_state::GameState) -> Point2<f32>
@@ -2601,7 +2671,8 @@ impl Map
 				air_control = 1.;
 			}
 			acceleration.pos = Vector3::new(want_move.x, want_move.y, 0.)
-				* air_control * stats.values.acceleration;
+				* air_control
+				* stats.values.acceleration;
 		}
 
 		for (id, (position, velocity, stats, jump, affected_by_gravity, controller)) in self
@@ -3533,11 +3604,28 @@ impl Map
 		}
 
 		// Die on zero life.
+		let mut player_died = false;
 		for (id, stats) in self.world.query::<&comps::Stats>().iter()
 		{
 			if stats.life <= 0.
 			{
 				to_die.push((true, id));
+				if id == self.player
+				{
+					player_died = true;
+				}
+			}
+		}
+		if player_died && !self.deleted_on_death
+		{
+			println!("Deleting save on death");
+			self.deleted_on_death = true;
+			let mut path_buf = utils::user_data_path(&state.core)?;
+			path_buf.push("save.cfg");
+			if path_buf.exists()
+			{
+				std::fs::remove_file(&path_buf)
+					.map_err(|_| format!("Couldn't delete '{}'", path_buf.to_str().unwrap()))?;
 			}
 		}
 
@@ -3601,7 +3689,7 @@ impl Map
 
 			spawn_crystals_from_map(
 				&self.tiles,
-				self.crystal_seed,
+				self.map_seed,
 				self.level,
 				&mut rng,
 				&mut self.world,

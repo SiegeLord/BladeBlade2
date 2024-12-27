@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::{components, controls, game_state, utils};
+use crate::{components, controls, game, game_state, utils};
 
 use allegro::*;
 use allegro_font::*;
@@ -22,6 +22,7 @@ pub enum Action
 	SelectMe,
 	MainMenu,
 	Start,
+	Resume,
 	Quit,
 	Back,
 	Forward(fn(&mut game_state::GameState) -> Result<SubScreen>),
@@ -814,35 +815,52 @@ pub struct MainMenu
 
 impl MainMenu
 {
-	pub fn new(state: &game_state::GameState) -> Self
+	pub fn new(state: &game_state::GameState) -> Result<Self>
 	{
 		let w = BUTTON_WIDTH;
 		let h = BUTTON_HEIGHT;
 
-		let widgets = WidgetList::new(&[
-			&[Widget::Button(Button::new(
+		let mut widgets = vec![];
+
+		let mut path_buf = utils::user_data_path(&state.core)?;
+		path_buf.push("save.cfg");
+		if path_buf.exists()
+		{
+			widgets.push(vec![Widget::Button(Button::new(
+				w,
+				h,
+				"Resume Game",
+				Action::Resume,
+			))]);
+		}
+
+		widgets.extend([
+			vec![Widget::Button(Button::new(
 				w,
 				h,
 				"New Game",
 				Action::Forward(|s| Ok(SubScreen::Story(Story::new(s)))),
 			))],
-			&[Widget::Button(Button::new(
+			vec![Widget::Button(Button::new(
 				w,
 				h,
 				"Controls",
 				Action::Forward(|s| Ok(SubScreen::ControlsMenu(ControlsMenu::new(s)))),
 			))],
-			&[Widget::Button(Button::new(
+			vec![Widget::Button(Button::new(
 				w,
 				h,
 				"Options",
 				Action::Forward(|s| Ok(SubScreen::OptionsMenu(OptionsMenu::new(s)))),
 			))],
-			&[Widget::Button(Button::new(w, h, "Quit", Action::Quit))],
+			vec![Widget::Button(Button::new(w, h, "Quit", Action::Quit))],
 		]);
-		let mut res = Self { widgets: widgets };
+
+		let mut res = Self {
+			widgets: WidgetList::new(&widgets.iter().map(|r| &r[..]).collect::<Vec<_>>()),
+		};
 		res.resize(state);
-		res
+		Ok(res)
 	}
 
 	pub fn draw(&self, state: &game_state::GameState)
@@ -1315,7 +1333,12 @@ impl InGameMenu
 				"Options",
 				Action::Forward(|s| Ok(SubScreen::OptionsMenu(OptionsMenu::new(s)))),
 			))],
-			&[Widget::Button(Button::new(w, h, "Quit", Action::MainMenu))],
+			&[Widget::Button(Button::new(
+				w,
+				h,
+				"Save and Quit",
+				Action::MainMenu,
+			))],
 		]);
 		let mut res = Self { widgets };
 		res.resize(state);

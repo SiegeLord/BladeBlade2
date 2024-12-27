@@ -246,7 +246,7 @@ impl Sprite
 	}
 }
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AnimationState
 {
 	animation_name: String,

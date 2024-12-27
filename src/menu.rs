@@ -56,7 +56,7 @@ impl Menu
 				if self.subscreens.is_empty()
 				{
 					self.subscreens
-						.push(ui::SubScreen::MainMenu(ui::MainMenu::new(state)));
+						.push(ui::SubScreen::MainMenu(ui::MainMenu::new(state)?));
 					self.subscreens.time_to_transition = state.time();
 					return Ok(None);
 				}
@@ -69,7 +69,8 @@ impl Menu
 			{
 				match action
 				{
-					ui::Action::Start => return Ok(Some(game_state::NextScreen::Game)),
+					ui::Action::Start => return Ok(Some(game_state::NextScreen::Game(false))),
+					ui::Action::Resume => return Ok(Some(game_state::NextScreen::Game(true))),
 					ui::Action::Quit => return Ok(Some(game_state::NextScreen::Quit)),
 					_ => (),
 				}

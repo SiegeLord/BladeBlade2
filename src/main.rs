@@ -281,9 +281,9 @@ fn real_main() -> Result<()>
 		{
 			match next_screen
 			{
-				game_state::NextScreen::Game =>
+				game_state::NextScreen::Game(resume) =>
 				{
-					cur_screen = Screen::Game(game::Game::new(&mut state)?);
+					cur_screen = Screen::Game(game::Game::new(resume, &mut state)?);
 				}
 				game_state::NextScreen::Menu =>
 				{

@@ -186,6 +186,42 @@ pub fn save_config<T: Serialize>(file: &str, val: T) -> Result<()>
 	Ok(())
 }
 
+pub fn user_data_path(core: &Core) -> Result<path::PathBuf>
+{
+	let mut path_buf = path::PathBuf::new();
+	if cfg!(feature = "use_user_settings")
+	{
+		path_buf.push(
+			core.get_standard_path(StandardPath::UserSettings)
+				.map_err(|_| "Couldn't get standard path".to_string())?,
+		);
+	}
+	Ok(path_buf)
+}
+
+pub fn load_user_data<T: DeserializeOwned + Clone>(core: &Core, filename: &str)
+	-> Result<Option<T>>
+{
+	let mut path_buf = user_data_path(core)?;
+	path_buf.push(filename);
+	if path_buf.exists()
+	{
+		Ok(Some(load_config(path_buf.to_str().unwrap())?))
+	}
+	else
+	{
+		Ok(None)
+	}
+}
+
+pub fn save_user_data<T: Serialize>(core: &Core, filename: &str, options: &T) -> Result<()>
+{
+	let mut path_buf = user_data_path(core)?;
+	std::fs::create_dir_all(&path_buf).map_err(|_| "Couldn't create directory".to_string())?;
+	path_buf.push(filename);
+	save_config(path_buf.to_str().unwrap(), &options)
+}
+
 pub fn load_bitmap(core: &Core, file: &str) -> Result<Bitmap>
 {
 	Ok(Bitmap::load(&core, file).map_err(|_| format!("Couldn't load {}", file))?)
