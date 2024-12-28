@@ -57,6 +57,10 @@ subdirectory). `run_msys.sh` may be useful for this purpose.
 - https://freesound.org/people/231372/sounds/708904/
 - https://freesound.org/people/cydon/sounds/268554/?
 
+## Code
+
+Radiance Cascades code was adapted from https://jason.today/rc
+
 # License
 
 GPL-v3
