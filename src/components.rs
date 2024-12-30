@@ -466,13 +466,18 @@ impl StatValues
 
 	pub fn new_enemy(level: i32, rarity: Rarity, ranged: bool) -> Self
 	{
-		let f = match rarity
+		let mut f = match rarity
 		{
 			Rarity::Normal => 1.,
 			Rarity::Magic => 1.5,
 			Rarity::Rare => 3.,
 			Rarity::Unique => 10.,
 		};
+
+		if !ranged
+		{
+			f *= 1.5;
+		}
 
 		Self {
 			speed: if ranged { 64. } else { 96. },
