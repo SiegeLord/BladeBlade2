@@ -207,6 +207,10 @@ impl Game
 		{
 			inventory_screen.logic(&mut self.map, state)?;
 		}
+		if !self.subscreens.is_empty() || self.inventory_screen.is_some()
+		{
+			state.controls.clear_action_states();
+		}
 		if let Ok(advance) = self.map.logic(state)
 		{
 			if advance

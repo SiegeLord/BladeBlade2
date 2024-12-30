@@ -39,7 +39,7 @@ impl Default for Options
 		Self {
 			fullscreen: true,
 			width: 960,
-			height: 864,
+			height: 720,
 			play_music: true,
 			vsync_method: if cfg!(target_os = "windows") { 1 } else { 2 },
 			sfx_volume: 1.,
