@@ -190,7 +190,6 @@ impl Game
 					state.sfx.play_sound("data/ui1.ogg")?;
 					self.inventory_screen = Some(InventoryScreen::new(&self.map));
 					self.map.inventory_shown = true;
-					state.paused = true;
 				}
 				else
 				{
@@ -198,7 +197,6 @@ impl Game
 					self.inventory_screen = None;
 					self.map.inventory_shown = false;
 					state.controls.clear_action_states();
-					state.paused = false;
 				}
 			}
 			state
@@ -297,7 +295,6 @@ impl Game
 				self.subscreens
 					.push(ui::SubScreen::InGameMenu(ui::InGameMenu::new(state)));
 				self.subscreens.reset_transition(state);
-				state.paused = true;
 			}
 		}
 		else
@@ -320,10 +317,6 @@ impl Game
 			if self.subscreens.is_empty()
 			{
 				state.controls.clear_action_states();
-				if self.inventory_screen.is_none()
-				{
-					state.paused = false;
-				}
 			}
 		}
 		Ok(None)
