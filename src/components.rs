@@ -483,7 +483,7 @@ impl StatValues
 			speed: if ranged { 64. } else { 96. },
 			acceleration: if ranged { 512. } else { 1400. },
 			skill_duration: 1.,
-			max_life: (42. + 10. * level as f32) * 1.1_f32.powf(level as f32),
+			max_life: (42. + 10. * level as f32) * 1.1_f32.powf(level as f32) * f,
 			mana_regen: 100.,
 			max_mana: 100.,
 			cast_speed: 1.,
