@@ -808,6 +808,10 @@ impl Stats
 		{
 			self.freeze_time = state.time() + freeze_duration as f64;
 		}
+		else
+		{
+			freeze_duration = 0.;
+		}
 
 		let old_ignited = !self.ignite_instances.is_empty();
 		let mut ignite = values.ignite_propagate_value;
