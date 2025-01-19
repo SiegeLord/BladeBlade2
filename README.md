@@ -8,6 +8,7 @@ can while killing all who stand in your way using your trusty Blade Blade.
 
 # Gameplay Hints
 
+- Open the inventory to pick up nearby items.
 - Cold damage can freeze enemies, causing them to stop moving or attacking.
 - Fire damage can ignite enemies, dealing damage over time.
 - Lightning damage can shock enemies, making them take more damage.
