@@ -1251,7 +1251,7 @@ fn spawn_player(
 		entity,
 		(
 			comps::Light {
-				color: Color::from_rgba_f(1., 0.5, 0.5, 1.),
+				color: Color::from_rgba_f(1., 0.8, 0.8, 1.),
 				offt_y: 20.,
 			},
 			comps::Jump::new(),

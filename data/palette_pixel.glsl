@@ -30,7 +30,7 @@ void main()
 	if (material == 2.0)
 	{
 		light_color = 4. * texture2D(light, 0.5 * varying_pos.xy + vec2(0.5, 0.5));
-		light_color = vec4(0.3) + light_color * 0.7;
+		light_color = vec4(0.4) + light_color * 0.6;
 	}
 
 	//vec4 color = texture2D(palette, vec2(5. / 255., 1.));
