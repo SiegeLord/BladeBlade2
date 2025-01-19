@@ -88,6 +88,29 @@ impl Button
 		let s = state.options.ui_scale;
 		let start = self.loc - s * self.size / 2.;
 		let end = self.loc + s * self.size / 2.;
+
+		if state
+			.menu_controls
+			.get_action_state(controls::Action::UIAccept)
+			> 0.5
+		{
+			if self.selected
+			{
+				state.sfx.play_sound("data/ui2.ogg").unwrap();
+				return Some(self.action.clone());
+			}
+		}
+		if state
+			.menu_controls
+			.get_action_state(controls::Action::UICancel)
+			> 0.5
+		{
+			if self.action == Action::Back
+			{
+				state.sfx.play_sound("data/ui2.ogg").unwrap();
+				return Some(self.action.clone());
+			}
+		}
 		match event
 		{
 			Event::MouseAxes { x, y, .. } =>
@@ -98,26 +121,6 @@ impl Button
 					return Some(Action::SelectMe);
 				}
 			}
-			Event::KeyDown { keycode, .. } => match keycode
-			{
-				KeyCode::Enter | KeyCode::Space =>
-				{
-					if self.selected
-					{
-						state.sfx.play_sound("data/ui2.ogg").unwrap();
-						return Some(self.action.clone());
-					}
-				}
-				KeyCode::Escape =>
-				{
-					if self.action == Action::Back
-					{
-						state.sfx.play_sound("data/ui2.ogg").unwrap();
-						return Some(self.action.clone());
-					}
-				}
-				_ => (),
-			},
 			Event::MouseButtonUp { x, y, .. } =>
 			{
 				let (x, y) = state.transform_mouse(*x as f32, *y as f32);
@@ -189,6 +192,16 @@ impl Toggle
 		let s = state.options.ui_scale;
 		let start = self.loc - s * self.size / 2.;
 		let end = self.loc + s * self.size / 2.;
+		if state
+			.menu_controls
+			.get_action_state(controls::Action::UIAccept)
+			> 0.5
+		{
+			if self.selected
+			{
+				return Some(self.trigger(state));
+			}
+		}
 		match event
 		{
 			Event::MouseAxes { x, y, .. } =>
@@ -199,17 +212,6 @@ impl Toggle
 					return Some(Action::SelectMe);
 				}
 			}
-			Event::KeyDown { keycode, .. } => match keycode
-			{
-				KeyCode::Enter | KeyCode::Space =>
-				{
-					if self.selected
-					{
-						return Some(self.trigger(state));
-					}
-				}
-				_ => (),
-			},
 			Event::MouseButtonUp { x, y, .. } =>
 			{
 				let (x, y) = state.transform_mouse(*x as f32, *y as f32);
@@ -331,6 +333,33 @@ impl Slider
 		let s = state.options.ui_scale;
 		let start = self.loc - s * self.size / 2.;
 		let end = self.loc + s * self.size / 2.;
+		let increment = self.round_to;
+		if state
+			.menu_controls
+			.get_action_state(controls::Action::UILeft)
+			> 0.5
+		{
+			if self.selected && self.cur_pos > self.min_pos
+			{
+				state.sfx.play_sound("data/ui2.ogg").unwrap();
+				self.cur_pos = utils::max(self.min_pos, self.cur_pos - increment);
+				self.round_cur_pos();
+				return Some((self.action_fn)(self.cur_pos));
+			}
+		}
+		if state
+			.menu_controls
+			.get_action_state(controls::Action::UIRight)
+			> 0.5
+		{
+			if self.selected && self.cur_pos < self.max_pos
+			{
+				state.sfx.play_sound("data/ui2.ogg").unwrap();
+				self.cur_pos = utils::min(self.max_pos, self.cur_pos + increment);
+				self.round_cur_pos();
+				return Some((self.action_fn)(self.cur_pos));
+			}
+		}
 		match event
 		{
 			Event::MouseAxes { x, y, .. } =>
@@ -366,37 +395,6 @@ impl Slider
 						+ (x - start.x) / (s * self.width()) * (self.max_pos - self.min_pos);
 					self.round_cur_pos();
 					return Some((self.action_fn)(self.cur_pos));
-				}
-			}
-			Event::KeyDown { keycode, .. } =>
-			{
-				let increment = self.round_to;
-				if self.selected
-				{
-					match keycode
-					{
-						KeyCode::Left =>
-						{
-							if self.cur_pos > self.min_pos
-							{
-								state.sfx.play_sound("data/ui2.ogg").unwrap();
-								self.cur_pos = utils::max(self.min_pos, self.cur_pos - increment);
-								self.round_cur_pos();
-								return Some((self.action_fn)(self.cur_pos));
-							}
-						}
-						KeyCode::Right =>
-						{
-							if self.cur_pos < self.max_pos
-							{
-								state.sfx.play_sound("data/ui2.ogg").unwrap();
-								self.cur_pos = utils::min(self.max_pos, self.cur_pos + increment);
-								self.round_cur_pos();
-								return Some((self.action_fn)(self.cur_pos));
-							}
-						}
-						_ => (),
-					}
 				}
 			}
 			_ => (),
@@ -649,87 +647,84 @@ impl WidgetList
 		}
 		if action.is_none() || action == Some(Action::SelectMe)
 		{
-			match event
+			if state.menu_controls.get_action_state(controls::Action::UIUp) > 0.5
 			{
-				Event::KeyDown { keycode, .. } => match *keycode
+				state.sfx.play_sound("data/ui1.ogg").unwrap();
+				'found1: loop
 				{
-					KeyCode::Up =>
+					self.cur_selection.0 =
+						(self.cur_selection.0 + self.widgets.len() - 1) % self.widgets.len();
+					let row_len = self.widgets[self.cur_selection.0].len();
+					if self.cur_selection.1 >= row_len
 					{
-						state.sfx.play_sound("data/ui1.ogg").unwrap();
-						'found1: loop
-						{
-							self.cur_selection.0 = (self.cur_selection.0 + self.widgets.len() - 1)
-								% self.widgets.len();
-							let row_len = self.widgets[self.cur_selection.0].len();
-							if self.cur_selection.1 >= row_len
-							{
-								self.cur_selection.1 = row_len - 1;
-							}
-							for _ in 0..row_len
-							{
-								if self.widgets[self.cur_selection.0][self.cur_selection.1]
-									.selectable()
-								{
-									break 'found1;
-								}
-								self.cur_selection.1 =
-									(self.cur_selection.1 + row_len - 1) % row_len;
-							}
-						}
+						self.cur_selection.1 = row_len - 1;
 					}
-					KeyCode::Down =>
+					for _ in 0..row_len
 					{
-						state.sfx.play_sound("data/ui1.ogg").unwrap();
-						'found2: loop
+						if self.widgets[self.cur_selection.0][self.cur_selection.1].selectable()
 						{
-							self.cur_selection.0 = (self.cur_selection.0 + self.widgets.len() + 1)
-								% self.widgets.len();
-							let row_len = self.widgets[self.cur_selection.0].len();
-							if self.cur_selection.1 >= row_len
-							{
-								self.cur_selection.1 = row_len - 1;
-							}
-							for _ in 0..row_len
-							{
-								if self.widgets[self.cur_selection.0][self.cur_selection.1]
-									.selectable()
-								{
-									break 'found2;
-								}
-								self.cur_selection.1 =
-									(self.cur_selection.1 + row_len - 1) % row_len;
-							}
+							break 'found1;
 						}
+						self.cur_selection.1 = (self.cur_selection.1 + row_len - 1) % row_len;
 					}
-					KeyCode::Left =>
+				}
+			}
+			if state
+				.menu_controls
+				.get_action_state(controls::Action::UIDown)
+				> 0.5
+			{
+				state.sfx.play_sound("data/ui1.ogg").unwrap();
+				'found2: loop
+				{
+					self.cur_selection.0 =
+						(self.cur_selection.0 + self.widgets.len() + 1) % self.widgets.len();
+					let row_len = self.widgets[self.cur_selection.0].len();
+					if self.cur_selection.1 >= row_len
 					{
-						state.sfx.play_sound("data/ui1.ogg").unwrap();
-						let row_len = self.widgets[self.cur_selection.0].len();
-						loop
-						{
-							self.cur_selection.1 = (self.cur_selection.1 + row_len - 1) % row_len;
-							if self.widgets[self.cur_selection.0][self.cur_selection.1].selectable()
-							{
-								break;
-							}
-						}
+						self.cur_selection.1 = row_len - 1;
 					}
-					KeyCode::Right =>
+					for _ in 0..row_len
 					{
-						state.sfx.play_sound("data/ui1.ogg").unwrap();
-						let row_len = self.widgets[self.cur_selection.0].len();
-						loop
+						if self.widgets[self.cur_selection.0][self.cur_selection.1].selectable()
 						{
-							self.cur_selection.1 = (self.cur_selection.1 + row_len + 1) % row_len;
-							if self.widgets[self.cur_selection.0][self.cur_selection.1].selectable()
-							{
-								break;
-							}
+							break 'found2;
 						}
+						self.cur_selection.1 = (self.cur_selection.1 + row_len - 1) % row_len;
 					}
-					_ => (),
-				},
-				_ => (),
+				}
+			}
+			if state
+				.menu_controls
+				.get_action_state(controls::Action::UILeft)
+				> 0.5
+			{
+				state.sfx.play_sound("data/ui1.ogg").unwrap();
+				let row_len = self.widgets[self.cur_selection.0].len();
+				loop
+				{
+					self.cur_selection.1 = (self.cur_selection.1 + row_len - 1) % row_len;
+					if self.widgets[self.cur_selection.0][self.cur_selection.1].selectable()
+					{
+						break;
+					}
+				}
+			}
+			if state
+				.menu_controls
+				.get_action_state(controls::Action::UIRight)
+				> 0.5
+			{
+				state.sfx.play_sound("data/ui1.ogg").unwrap();
+				let row_len = self.widgets[self.cur_selection.0].len();
+				loop
+				{
+					self.cur_selection.1 = (self.cur_selection.1 + row_len + 1) % row_len;
+					if self.widgets[self.cur_selection.0][self.cur_selection.1].selectable()
+					{
+						break;
+					}
+				}
 			}
 		}
 		self.widgets[old_selection.0][old_selection.1].set_selected(false);
@@ -1467,7 +1462,15 @@ impl SubScreens
 		if self.action.is_none()
 		{
 			self.action = self.subscreens.last_mut().unwrap().input(state, event);
-			if self.action.is_some() && self.action != Some(Action::SelectMe)
+			let is_change_input = if let Some(Action::ChangeInput(_, _)) = self.action
+			{
+				true
+			}
+			else
+			{
+				false
+			};
+			if self.action.is_some() && self.action != Some(Action::SelectMe) && !is_change_input
 			{
 				self.time_to_transition = state.core.get_time() + TRANSITION_TIME;
 			}

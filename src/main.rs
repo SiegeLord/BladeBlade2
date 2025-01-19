@@ -83,6 +83,12 @@ fn real_main() -> Result<()>
 			.expect("Couldn't get mouse"),
 	);
 	queue.register_event_source(timer.get_event_source());
+	queue.register_event_source(
+		state
+			.core
+			.get_joystick_event_source()
+			.expect("Couldn't get joystick"),
+	);
 
 	let mut quit = false;
 
@@ -201,11 +207,16 @@ fn real_main() -> Result<()>
 		}
 
 		let event = queue.get_next_event();
+		state.controls.decode_event(&event);
+		state.menu_controls.decode_event(&event);
+		state.game_ui_controls.decode_event(&event);
 		let mut next_screen = match &mut cur_screen
 		{
 			Screen::Game(game) => game.input(&event, &mut state)?,
 			Screen::Menu(menu) => menu.input(&event, &mut state)?,
 		};
+		state.menu_controls.clear_action_states();
+		state.game_ui_controls.clear_action_states();
 
 		match event
 		{

@@ -248,7 +248,6 @@ impl Game
 		&mut self, event: &Event, state: &mut game_state::GameState,
 	) -> Result<Option<game_state::NextScreen>>
 	{
-		state.controls.decode_event(event);
 		match *event
 		{
 			Event::MouseAxes { x, y, .. } =>
@@ -269,29 +268,23 @@ impl Game
 			{
 				handled |= inventory_screen.input(event, &mut self.map, state)?;
 			}
-			match *event
+			if state
+				.game_ui_controls
+				.get_action_state(controls::Action::UICancel)
+				> 0.5
 			{
-				Event::KeyDown {
-					keycode: KeyCode::Escape,
-					..
-				} =>
+				in_game_menu = true;
+			}
+			else if !handled
+			{
+				let res = self.map.input(event, state);
+				if let Ok(Some(game_state::NextScreen::InGameMenu)) = res
 				{
 					in_game_menu = true;
 				}
-				_ =>
+				else
 				{
-					if !handled
-					{
-						let res = self.map.input(event, state);
-						if let Ok(Some(game_state::NextScreen::InGameMenu)) = res
-						{
-							in_game_menu = true;
-						}
-						else
-						{
-							return res;
-						}
-					}
+					return res;
 				}
 			}
 			if in_game_menu
@@ -424,27 +417,46 @@ impl InventoryScreen
 	}
 
 	pub fn input(
-		&mut self, event: &Event, map: &mut Map, state: &mut game_state::GameState,
+		&mut self, _event: &Event, map: &mut Map, state: &mut game_state::GameState,
 	) -> Result<bool>
 	{
-		// LOL!
+		// LOL! Turned out pretty useful for arbitrary layout UIs...
 		let mut sel_dir = Vector2::zeros();
 		let mut do_swap = false;
-		match event
+		if state
+			.game_ui_controls
+			.get_action_state(controls::Action::UIDown)
+			> 0.5
 		{
-			KeyChar { keycode, .. } => match keycode
-			{
-				KeyCode::Down => sel_dir = Vector2::new(0., 1.),
-				KeyCode::Up => sel_dir = Vector2::new(0., -1.),
-				KeyCode::Left => sel_dir = Vector2::new(-1., 0.),
-				KeyCode::Right => sel_dir = Vector2::new(1., 0.),
-				KeyCode::Space | KeyCode::Enter =>
-				{
-					do_swap = true;
-				}
-				_ => (),
-			},
-			_ => (),
+			sel_dir = Vector2::new(0., 1.)
+		}
+		if state
+			.game_ui_controls
+			.get_action_state(controls::Action::UIUp)
+			> 0.5
+		{
+			sel_dir = Vector2::new(0., -1.)
+		}
+		if state
+			.game_ui_controls
+			.get_action_state(controls::Action::UILeft)
+			> 0.5
+		{
+			sel_dir = Vector2::new(-1., 0.)
+		}
+		if state
+			.game_ui_controls
+			.get_action_state(controls::Action::UIRight)
+			> 0.5
+		{
+			sel_dir = Vector2::new(1., 0.)
+		}
+		if state
+			.game_ui_controls
+			.get_action_state(controls::Action::UIAccept)
+			> 0.5
+		{
+			do_swap = true;
 		}
 		let cur_offt = CELL_OFFTS[self.selection as usize];
 
@@ -2442,7 +2454,12 @@ impl Map
 					- state.controls.get_action_state(controls::Action::MoveLeft);
 				let dy = state.controls.get_action_state(controls::Action::MoveDown)
 					- state.controls.get_action_state(controls::Action::MoveUp);
-				controller.want_move = Vector2::new(dx, dy);
+				let mut diff = Vector2::new(dx, dy);
+				if diff.norm() > 0.
+				{
+					diff = diff.normalize();
+				}
+				controller.want_move = diff;
 				controller.want_jump =
 					state.controls.get_action_state(controls::Action::Jump) > 0.5;
 			}
@@ -3180,7 +3197,7 @@ impl Map
 				velocity.ground_pos = Vector3::zeros();
 				continue;
 			}
-			let decel = 1024.;
+			let decel = 2048.;
 			let relative_velocity = velocity.pos - velocity.ground_pos;
 			if relative_velocity.x.abs() > 0. && acceleration.pos.x == 0.
 			{

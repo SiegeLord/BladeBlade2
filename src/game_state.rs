@@ -49,7 +49,7 @@ impl Default for Options
 			ui_scale: 1.,
 			frac_scale: true,
 			ray_casting_steps: 16,
-			controls: controls::Controls::new(),
+			controls: controls::Controls::new_game(),
 		}
 	}
 }
@@ -80,6 +80,8 @@ pub struct GameState
 	bitmaps: HashMap<String, Bitmap>,
 	sprites: HashMap<String, sprite::Sprite>,
 	pub controls: controls::ControlsHandler,
+	pub menu_controls: controls::ControlsHandler,
+	pub game_ui_controls: controls::ControlsHandler,
 	pub track_mouse: bool,
 	pub mouse_pos: Point2<i32>,
 
@@ -135,6 +137,10 @@ impl GameState
 			.map_err(|_| "Couldn't install keyboard".to_string())?;
 		core.install_mouse()
 			.map_err(|_| "Couldn't install mouse".to_string())?;
+		core.set_joystick_mappings("data/gamecontrollerdb.txt")
+			.map_err(|_| "Couldn't set joystick mappings".to_string())?;
+		core.install_joystick()
+			.map_err(|_| "Couldn't install joysticks".to_string())?;
 
 		let sfx = sfx::Sfx::new(options.sfx_volume, options.music_volume, &core)?;
 		//sfx.set_music_file("data/lemonade-sinus.xm");
@@ -163,6 +169,8 @@ impl GameState
 			buffer1: None,
 			buffer2: None,
 			controls: controls,
+			menu_controls: controls::ControlsHandler::new(controls::Controls::new_menu()),
+			game_ui_controls: controls::ControlsHandler::new(controls::Controls::new_game_ui()),
 			track_mouse: true,
 			mouse_pos: Point2::new(0, 0),
 			palette_shader: Default::default(),

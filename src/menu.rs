@@ -51,7 +51,7 @@ impl Menu
 					state.mouse_pos = Point2::new(x as i32, y as i32);
 				}
 			}
-			Event::KeyDown { .. } =>
+			Event::KeyDown { .. } | Event::JoystickButtonDown { .. } =>
 			{
 				if self.subscreens.is_empty()
 				{

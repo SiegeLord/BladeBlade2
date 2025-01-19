@@ -15,6 +15,12 @@ pub enum Action
 	Jump,
 	BladeBlade,
 	Inventory,
+	UILeft,
+	UIRight,
+	UIUp,
+	UIDown,
+	UIAccept,
+	UICancel,
 }
 
 impl Action
@@ -30,6 +36,12 @@ impl Action
 			Action::Jump => "Jump",
 			Action::BladeBlade => "BladeBlade",
 			Action::Inventory => "Show Inventory",
+			Action::UILeft => "UI Left",
+			Action::UIRight => "UI Right",
+			Action::UIUp => "UI Up",
+			Action::UIDown => "UI Down",
+			Action::UIAccept => "UI Accept",
+			Action::UICancel => "UI Cancel",
 		}
 	}
 }
@@ -38,6 +50,9 @@ impl Action
 pub enum Input
 {
 	Keyboard(allegro::KeyCode),
+	JoystickPosAxis(allegro::JoystickStick, i32),
+	JoystickNegAxis(allegro::JoystickStick, i32),
+	JoystickButton(allegro::JoystickButton),
 	MouseButton(i32),
 	MouseXPos,
 	MouseYPos,
@@ -204,6 +219,43 @@ impl Input
 			Input::MouseXPos => "MouseX+",
 			Input::MouseYPos => "MouseY+",
 			Input::MouseZPos => "MouseZ+",
+			Input::JoystickButton(b) => match b
+			{
+				allegro::JoystickButton::A => "A Btn",
+				allegro::JoystickButton::B => "B Btn",
+				allegro::JoystickButton::X => "X Btn",
+				allegro::JoystickButton::Y => "Y Btn",
+				allegro::JoystickButton::LeftShoulder => "Left Shoulder",
+				allegro::JoystickButton::RightShoulder => "Right Shoulder",
+				allegro::JoystickButton::Back => "Back",
+				allegro::JoystickButton::Start => "Start",
+				allegro::JoystickButton::Guide => "Guide",
+				allegro::JoystickButton::LeftThumb => "Left Thumb",
+				allegro::JoystickButton::RightThumb => "Right Thumb",
+				_ => panic!("Joystick button not supported: {b:?}"),
+			},
+			Input::JoystickPosAxis(stick, axis) => match (stick, axis)
+			{
+				(allegro::JoystickStick::DPad, 0) => "DPad X+",
+				(allegro::JoystickStick::DPad, 1) => "DPad Y+",
+				(allegro::JoystickStick::LeftThumb, 0) => "Left Thumb X+",
+				(allegro::JoystickStick::LeftThumb, 1) => "Left Thumb Y+",
+				(allegro::JoystickStick::RightThumb, 0) => "Right Thumb X+",
+				(allegro::JoystickStick::RightThumb, 1) => "Right Thumb Y+",
+				(allegro::JoystickStick::LeftTrigger, 0) => "Left Trigger",
+				(allegro::JoystickStick::RightTrigger, 0) => "Right Trigger",
+				_ => panic!("Joystick axis not supported: {stick:?} {axis:?}"),
+			},
+			Input::JoystickNegAxis(stick, axis) => match (stick, axis)
+			{
+				(allegro::JoystickStick::DPad, 0) => "DPad X-",
+				(allegro::JoystickStick::DPad, 1) => "DPad Y-",
+				(allegro::JoystickStick::LeftThumb, 0) => "Left Thumb X-",
+				(allegro::JoystickStick::LeftThumb, 1) => "Left Thumb Y-",
+				(allegro::JoystickStick::RightThumb, 0) => "Right Thumb X-",
+				(allegro::JoystickStick::RightThumb, 1) => "Right Thumb Y-",
+				_ => panic!("Joystick axis not supported: {stick:?} {axis:?}"),
+			},
 		}
 	}
 
@@ -376,6 +428,90 @@ impl Input
 			}
 		}
 
+		if input.is_none()
+		{
+			input = match s
+			{
+				"A Btn" => Some(Input::JoystickButton(allegro::JoystickButton::A)),
+				"B Btn" => Some(Input::JoystickButton(allegro::JoystickButton::B)),
+				"X Btn" => Some(Input::JoystickButton(allegro::JoystickButton::X)),
+				"Y Btn" => Some(Input::JoystickButton(allegro::JoystickButton::Y)),
+				"Left Shoulder" =>
+				{
+					Some(Input::JoystickButton(allegro::JoystickButton::LeftShoulder))
+				}
+				"Right Shoulder" => Some(Input::JoystickButton(
+					allegro::JoystickButton::RightShoulder,
+				)),
+				"Back" => Some(Input::JoystickButton(allegro::JoystickButton::Back)),
+				"Start" => Some(Input::JoystickButton(allegro::JoystickButton::Start)),
+				"Guide" => Some(Input::JoystickButton(allegro::JoystickButton::Guide)),
+				"Left Thumb" => Some(Input::JoystickButton(allegro::JoystickButton::LeftThumb)),
+				"Right Thumb" => Some(Input::JoystickButton(allegro::JoystickButton::RightThumb)),
+				_ => None,
+			}
+		}
+
+		if input.is_none()
+		{
+			input = match s
+			{
+				"DPad X+" => Some(Input::JoystickPosAxis(allegro::JoystickStick::DPad, 0)),
+				"DPad Y+" => Some(Input::JoystickPosAxis(allegro::JoystickStick::DPad, 1)),
+				"Left Thumb X+" =>
+				{
+					Some(Input::JoystickPosAxis(allegro::JoystickStick::LeftThumb, 0))
+				}
+				"Left Thumb Y+" =>
+				{
+					Some(Input::JoystickPosAxis(allegro::JoystickStick::LeftThumb, 1))
+				}
+				"Right Thumb X+" => Some(Input::JoystickPosAxis(
+					allegro::JoystickStick::RightThumb,
+					0,
+				)),
+				"Right Thumb Y+" => Some(Input::JoystickPosAxis(
+					allegro::JoystickStick::RightThumb,
+					1,
+				)),
+				"Left Trigger" => Some(Input::JoystickPosAxis(
+					allegro::JoystickStick::LeftTrigger,
+					0,
+				)),
+				"Right Trigger" => Some(Input::JoystickPosAxis(
+					allegro::JoystickStick::RightTrigger,
+					0,
+				)),
+				_ => None,
+			}
+		}
+
+		if input.is_none()
+		{
+			input = match s
+			{
+				"DPad X-" => Some(Input::JoystickNegAxis(allegro::JoystickStick::DPad, 0)),
+				"DPad Y-" => Some(Input::JoystickNegAxis(allegro::JoystickStick::DPad, 1)),
+				"Left Thumb X-" =>
+				{
+					Some(Input::JoystickNegAxis(allegro::JoystickStick::LeftThumb, 0))
+				}
+				"Left Thumb Y-" =>
+				{
+					Some(Input::JoystickNegAxis(allegro::JoystickStick::LeftThumb, 1))
+				}
+				"Right Thumb X-" => Some(Input::JoystickNegAxis(
+					allegro::JoystickStick::RightThumb,
+					0,
+				)),
+				"Right Thumb Y-" => Some(Input::JoystickNegAxis(
+					allegro::JoystickStick::RightThumb,
+					1,
+				)),
+				_ => None,
+			}
+		}
+
 		input
 	}
 }
@@ -486,53 +622,160 @@ pub struct Controls
 
 impl Controls
 {
-	pub fn new() -> Self
+	pub fn new_game() -> Self
 	{
 		let mut action_to_inputs = BTreeMap::new();
 		action_to_inputs.insert(
 			Action::MoveUp,
 			[
 				Some(Input::Keyboard(allegro::KeyCode::W)),
-				Some(Input::Keyboard(allegro::KeyCode::Up)),
+				Some(Input::JoystickNegAxis(allegro::JoystickStick::DPad, 1)),
 			],
 		);
 		action_to_inputs.insert(
 			Action::MoveLeft,
 			[
 				Some(Input::Keyboard(allegro::KeyCode::A)),
-				Some(Input::Keyboard(allegro::KeyCode::Left)),
+				Some(Input::JoystickNegAxis(allegro::JoystickStick::DPad, 0)),
 			],
 		);
 		action_to_inputs.insert(
 			Action::MoveRight,
 			[
 				Some(Input::Keyboard(allegro::KeyCode::D)),
-				Some(Input::Keyboard(allegro::KeyCode::Right)),
+				Some(Input::JoystickPosAxis(allegro::JoystickStick::DPad, 0)),
 			],
 		);
 		action_to_inputs.insert(
 			Action::MoveDown,
 			[
 				Some(Input::Keyboard(allegro::KeyCode::S)),
-				Some(Input::Keyboard(allegro::KeyCode::Down)),
+				Some(Input::JoystickPosAxis(allegro::JoystickStick::DPad, 1)),
 			],
 		);
 		action_to_inputs.insert(
 			Action::Jump,
-			[Some(Input::Keyboard(allegro::KeyCode::Space)), None],
+			[
+				Some(Input::Keyboard(allegro::KeyCode::Space)),
+				Some(Input::JoystickButton(allegro::JoystickButton::A)),
+			],
 		);
 		action_to_inputs.insert(
 			Action::BladeBlade,
 			[
 				Some(Input::Keyboard(allegro::KeyCode::Enter)),
-				Some(Input::Keyboard(allegro::KeyCode::LCtrl)),
+				Some(Input::JoystickPosAxis(allegro::JoystickStick::RightTrigger, 0)),
 			],
 		);
 		action_to_inputs.insert(
 			Action::Inventory,
 			[
 				Some(Input::Keyboard(allegro::KeyCode::Tab)),
-				Some(Input::Keyboard(allegro::KeyCode::I)),
+				Some(Input::JoystickButton(allegro::JoystickButton::B)),
+			],
+		);
+
+		Self {
+			action_to_inputs: action_to_inputs,
+			mouse_sensitivity: 0.1,
+		}
+	}
+
+	pub fn new_menu() -> Self
+	{
+		let mut action_to_inputs = BTreeMap::new();
+		action_to_inputs.insert(
+			Action::UIUp,
+			[
+				Some(Input::Keyboard(allegro::KeyCode::Up)),
+				Some(Input::JoystickNegAxis(allegro::JoystickStick::DPad, 1)),
+			],
+		);
+		action_to_inputs.insert(
+			Action::UIDown,
+			[
+				Some(Input::Keyboard(allegro::KeyCode::Down)),
+				Some(Input::JoystickPosAxis(allegro::JoystickStick::DPad, 1)),
+			],
+		);
+		action_to_inputs.insert(
+			Action::UILeft,
+			[
+				Some(Input::Keyboard(allegro::KeyCode::Left)),
+				Some(Input::JoystickNegAxis(allegro::JoystickStick::DPad, 0)),
+			],
+		);
+		action_to_inputs.insert(
+			Action::UIRight,
+			[
+				Some(Input::Keyboard(allegro::KeyCode::Right)),
+				Some(Input::JoystickPosAxis(allegro::JoystickStick::DPad, 0)),
+			],
+		);
+		action_to_inputs.insert(
+			Action::UIAccept,
+			[
+				Some(Input::Keyboard(allegro::KeyCode::Enter)),
+				Some(Input::JoystickButton(allegro::JoystickButton::A)),
+			],
+		);
+		action_to_inputs.insert(
+			Action::UICancel,
+			[
+				Some(Input::Keyboard(allegro::KeyCode::Escape)),
+				Some(Input::JoystickButton(allegro::JoystickButton::B)),
+			],
+		);
+
+		Self {
+			action_to_inputs: action_to_inputs,
+			mouse_sensitivity: 0.1,
+		}
+	}
+
+	pub fn new_game_ui() -> Self
+	{
+		let mut action_to_inputs = BTreeMap::new();
+		action_to_inputs.insert(
+			Action::UIUp,
+			[
+				Some(Input::Keyboard(allegro::KeyCode::Up)),
+				Some(Input::JoystickNegAxis(allegro::JoystickStick::DPad, 1)),
+			],
+		);
+		action_to_inputs.insert(
+			Action::UIDown,
+			[
+				Some(Input::Keyboard(allegro::KeyCode::Down)),
+				Some(Input::JoystickPosAxis(allegro::JoystickStick::DPad, 1)),
+			],
+		);
+		action_to_inputs.insert(
+			Action::UILeft,
+			[
+				Some(Input::Keyboard(allegro::KeyCode::Left)),
+				Some(Input::JoystickNegAxis(allegro::JoystickStick::DPad, 0)),
+			],
+		);
+		action_to_inputs.insert(
+			Action::UIRight,
+			[
+				Some(Input::Keyboard(allegro::KeyCode::Right)),
+				Some(Input::JoystickPosAxis(allegro::JoystickStick::DPad, 0)),
+			],
+		);
+		action_to_inputs.insert(
+			Action::UIAccept,
+			[
+				Some(Input::Keyboard(allegro::KeyCode::Enter)),
+				Some(Input::JoystickButton(allegro::JoystickButton::A)),
+			],
+		);
+		action_to_inputs.insert(
+			Action::UICancel,
+			[
+				Some(Input::Keyboard(allegro::KeyCode::Escape)),
+				Some(Input::JoystickButton(allegro::JoystickButton::Start)),
 			],
 		);
 
@@ -645,6 +888,70 @@ impl ControlsHandler
 				if let Some(state) = self.input_state.get_mut(&Input::Keyboard(*keycode))
 				{
 					state.push(0.);
+				}
+			}
+			allegro::Event::JoystickButtonDown { button, .. } =>
+			{
+				if let Some(state) = self.input_state.get_mut(&Input::JoystickButton(*button))
+				{
+					state.push(1.);
+				}
+			}
+			allegro::Event::JoystickButtonUp { button, .. } =>
+			{
+				if let Some(state) = self.input_state.get_mut(&Input::JoystickButton(*button))
+				{
+					state.push(0.);
+				}
+			}
+			allegro::Event::JoystickAxes {
+				axis, stick, pos, ..
+			} =>
+			{
+				if *pos > 0.1
+				{
+					if let Some(state) = self
+						.input_state
+						.get_mut(&Input::JoystickPosAxis(*stick, *axis))
+					{
+						state.push(*pos);
+					}
+					if let Some(state) = self
+						.input_state
+						.get_mut(&Input::JoystickNegAxis(*stick, *axis))
+					{
+						state.push(0.);
+					}
+				}
+				else if *pos < -0.1
+				{
+					if let Some(state) = self
+						.input_state
+						.get_mut(&Input::JoystickPosAxis(*stick, *axis))
+					{
+						state.push(0.);
+					}
+					if let Some(state) = self
+						.input_state
+						.get_mut(&Input::JoystickNegAxis(*stick, *axis))
+					{
+						state.push(-*pos);
+					}
+				}
+				else
+				{
+					if let Some(state) = self
+						.input_state
+						.get_mut(&Input::JoystickPosAxis(*stick, *axis))
+					{
+						state.push(0.);
+					}
+					if let Some(state) = self
+						.input_state
+						.get_mut(&Input::JoystickNegAxis(*stick, *axis))
+					{
+						state.push(0.);
+					}
 				}
 			}
 			allegro::Event::MouseButtonDown { button, .. } =>
@@ -804,6 +1111,43 @@ impl ControlsHandler
 					(_, _, Ordering::Less) => Some(Input::MouseZNeg),
 					(_, _, Ordering::Greater) => Some(Input::MouseZPos),
 					_ => None,
+				}
+			}
+			allegro::Event::JoystickButtonDown { button, .. } =>
+			{
+				handled = true;
+				if let allegro::JoystickButton::Generic(_) = button
+				{
+					None
+				}
+				else
+				{
+					Some(Input::JoystickButton(*button))
+				}
+			}
+			allegro::Event::JoystickAxes {
+				stick, axis, pos, ..
+			} =>
+			{
+				if let allegro::JoystickStick::Generic(_) = stick
+				{
+					None
+				}
+				else if pos.abs() < 0.5
+				{
+					None
+				}
+				else
+				{
+					handled = true;
+					if *pos > 0.
+					{
+						Some(Input::JoystickPosAxis(*stick, *axis))
+					}
+					else
+					{
+						Some(Input::JoystickNegAxis(*stick, *axis))
+					}
 				}
 			}
 			_ => None,
