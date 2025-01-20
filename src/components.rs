@@ -68,6 +68,7 @@ pub enum Material
 	Default = 0,
 	Frozen = 1,
 	Lit = 2,
+	Darkened = 3,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

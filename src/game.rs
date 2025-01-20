@@ -1227,12 +1227,21 @@ impl Scene
 	}
 }
 
+fn get_level_palette(palettes: &[String], level: i32) -> &str
+{
+	&palettes[(level as usize / 5) % palettes.len()]
+}
+
 fn spawn_platform(
-	pos: Point3<f32>, waypoints: Vec<(Point2<f32>, f64)>, world: &mut hecs::World,
+	pos: Point3<f32>, waypoints: Vec<(Point2<f32>, f64)>, level: i32,
+	state: &game_state::GameState, world: &mut hecs::World,
 ) -> Result<hecs::Entity>
 {
+	let mut appearance = comps::Appearance::new_with_bias("data/platform.cfg", -48);
+	let sprite = state.get_sprite(&appearance.sprite)?;
+	appearance.palette = Some(get_level_palette(sprite.get_palettes(), level).to_string());
 	let entity = world.spawn((
-		comps::Appearance::new_with_bias("data/platform.cfg", -48),
+		appearance,
 		comps::Position::new(pos),
 		comps::Velocity::new(Vector3::zeros()),
 		comps::Solid {
@@ -1569,10 +1578,16 @@ fn spawn_exit(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
 	Ok(entity)
 }
 
-fn spawn_doodad(pos: Point3<f32>, world: &mut hecs::World) -> Result<hecs::Entity>
+fn spawn_doodad(
+	pos: Point3<f32>, level: i32, state: &game_state::GameState, world: &mut hecs::World,
+) -> Result<hecs::Entity>
 {
+	let mut appearance = comps::Appearance::new("data/doodad.cfg");
+	let sprite = state.get_sprite(&appearance.sprite)?;
+	appearance.palette = Some(get_level_palette(sprite.get_palettes(), level).to_string());
+	appearance.material = comps::Material::Darkened;
 	let entity = world.spawn((
-		comps::Appearance::new("data/doodad.cfg"),
+		appearance,
 		comps::Position::new(pos),
 		comps::Solid {
 			size: 10.,
@@ -2162,10 +2177,9 @@ impl Tiles
 	) -> Result<()>
 	{
 		let sprite = state.get_sprite(&self.sprite)?;
-		let palettes = sprite.get_palettes();
 		let palette_index = state
 			.palettes
-			.get_palette_index(&palettes[(self.level as usize / 5) % palettes.len()])?;
+			.get_palette_index(&get_level_palette(sprite.get_palettes(), self.level))?;
 		for y in 0..self.height
 		{
 			for x in 0..self.width
@@ -2332,20 +2346,22 @@ impl Map
 		let mut world = hecs::World::new();
 
 		let tiles = Tiles::new(map_file, "data/terrain.cfg", level)?;
-		let bkg_tiles = Tiles::new(&format!("data/tree_{}.tmx", level % 2), "data/tree.cfg")?;
+		let bkg_tiles = Tiles::new(&format!("data/tree_{}.tmx", level % 2), "data/tree.cfg", 0)?;
 
 		for (start, waypoints) in &tiles.platforms
 		{
 			spawn_platform(
 				Point3::new(start.x, start.y, 0.),
 				waypoints.clone(),
+				level,
+				state,
 				&mut world,
 			)?;
 		}
 
 		for pos in &tiles.doodads
 		{
-			spawn_doodad(Point3::new(pos.x, pos.y, 0.), &mut world)?;
+			spawn_doodad(Point3::new(pos.x, pos.y, 0.), level, state, &mut world)?;
 		}
 
 		let mut rng = thread_rng();
