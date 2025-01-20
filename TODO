@@ -3,29 +3,29 @@
         New crystals - done
         New uniques - done
 
-    New map
-    New tree map
+    New map - done
+    New tree map - done
 
     Misc
 
-    Different palettes for map levels
-    More diffuculty scaling
-    Nerf cold a little bit
+    Different palettes for map levels - done
+    More diffuculty scaling - done
+    Nerf cold a little bit - done
 
     Uniques:
-        A:
+        A: - done
             Cannot be frozen
             Cannot freeze
-        B:
+        B: - done
             Avoid damage 50% of the time when no armor
-        C:
+        C: - done
             Resistances are 70%
             Lose 10% life/sec
-        D:
+        D: - done
             25% leech is instant
             50% less life
             50% less mana
-        E:
+        E: - done
             Armor adds to physical damage
             Deal no elemental damage
 
