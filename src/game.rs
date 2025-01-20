@@ -2509,7 +2509,7 @@ impl Map
 			let wander_time = 0.5;
 			let chase_time = 1.;
 			let attack_time = 1.;
-			let sense_range = 104.;
+			let sense_range = 128.;
 			let leash_range = 64.;
 			let attack_range = ai.attack_range;
 
@@ -2653,10 +2653,13 @@ impl Map
 							controller.want_move = Vector2::zeros();
 							controller.want_attack = true;
 							controller.target_position = target_position.pos;
-							let diff = target_position.pos - position.pos;
-							position.dir = diff.y.atan2(diff.x);
+							if !stats.attacking
+							{
+								let diff = target_position.pos - position.pos;
+								position.dir = diff.y.atan2(diff.x);
+							}
 						}
-						else
+						else if !stats.attacking
 						{
 							next_state = Some(comps::AIState::Chase(cur_target));
 						}
