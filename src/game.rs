@@ -35,13 +35,13 @@ pub struct Save
 
 impl Save
 {
-	pub fn new(seed: u64) -> Self
+	pub fn new(seed: u64, state: &game_state::GameState) -> Self
 	{
 		Self {
 			stats: GameStats::new(),
 			inventory: comps::Inventory::new(),
 			map_seed: seed,
-			map_file: "data/map_3.tmx".into(),
+			map_file: state.game_spec.start_map.clone(),
 			level: 1,
 		}
 	}
@@ -74,7 +74,6 @@ pub struct Game
 	map: Map,
 	subscreens: ui::SubScreens,
 	inventory_screen: Option<InventoryScreen>,
-	map_files: Vec<String>,
 }
 
 impl Game
@@ -137,21 +136,8 @@ impl Game
 		state.cache_sprite("data/orb_small.cfg")?;
 		state.cache_sprite("data/orb_big.cfg")?;
 
-		let mut map_files = vec![];
-		for entry in glob::glob("data/map_*.tmx").unwrap()
-		{
-			if let Ok(path) = entry
-			{
-				map_files.push(path.to_string_lossy().to_string());
-			}
-		}
-		if map_files.is_empty()
-		{
-			return Err("No maps found!".to_string().into());
-		}
-
 		let mut rng = thread_rng();
-		let mut save = Save::new(rng.gen());
+		let mut save = Save::new(rng.gen(), state);
 		if resume
 		{
 			if let Some(resumed_save) = utils::load_user_data(&state.core, "save.cfg")?
@@ -171,7 +157,6 @@ impl Game
 			)?,
 			subscreens: ui::SubScreens::new(state),
 			inventory_screen: None,
-			map_files: map_files,
 		})
 	}
 
@@ -218,7 +203,15 @@ impl Game
 				let mut rng = thread_rng();
 				loop
 				{
-					let new_map_file = self.map_files.choose(&mut rng).unwrap();
+					let new_map_file = state
+						.game_spec
+						.maps
+						.iter()
+						.filter(|ms| self.map.level + 1 >= ms.min_level)
+						.choose(&mut rng)
+						.unwrap()
+						.map
+						.clone();
 					if *new_map_file == self.map.map_file
 					{
 						continue;
@@ -3165,6 +3158,10 @@ impl Map
 			)>()
 			.iter()
 		{
+			if waypoints.waypoints.is_empty()
+			{
+				continue;
+			}
 			let (cur_waypoint_pos, time_to_linger) = waypoints.waypoints[waypoints.cur_idx];
 			let diff = cur_waypoint_pos - position.pos.xy();
 			if diff.norm() < velocity.pos.xy().norm() * DT || diff.norm() == 0.

@@ -13,6 +13,26 @@ use std::{fmt, path, sync};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+fn default_min_level() -> i32
+{
+	0
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MapSpec
+{
+	pub map: String,
+	#[serde(default = "default_min_level")]
+	pub min_level: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GameSpec
+{
+	pub maps: Vec<MapSpec>,
+	pub start_map: String,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Options
 {
@@ -106,6 +126,7 @@ pub struct GameState
 	pub ray_casting_shader: sync::Weak<Shader>,
 
 	pub palettes: palette::PaletteList,
+	pub game_spec: GameSpec,
 
 	pub alpha: f32,
 }
@@ -186,6 +207,7 @@ impl GameState
 			distance_buffer_1: None,
 			distance_buffer_2: None,
 			distance_buffer_fin: None,
+			game_spec: utils::load_config("data/game.cfg")?,
 			alpha: 0.,
 		})
 	}
