@@ -1226,7 +1226,7 @@ impl ItemPrefix
 			ItemPrefix::Life => (20., 1.),
 			ItemPrefix::LifeRegen => (1., 1.),
 			ItemPrefix::AddedPhysicalDamage => (2., 1.),
-			ItemPrefix::AddedColdDamage => (2., 1.),
+			ItemPrefix::AddedColdDamage => (1., 1.),
 			ItemPrefix::AddedFireDamage => (2., 1.),
 			ItemPrefix::AddedLightningDamage => (2., 1.),
 			ItemPrefix::CriticalChance => (0.1, 0.01),
@@ -1796,6 +1796,15 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 			break;
 		}
 	}
+
+	let affix_level = if rarity == Rarity::Magic
+	{
+		level * 3 / 2
+	}
+	else
+	{
+		level
+	};
 	let mut prefixes: Vec<(_, i32, f32)> = vec![];
 	for _ in 0..num_prefixes
 	{
@@ -1806,7 +1815,7 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 			{
 				prefixes.push((
 					prefix,
-					rng.gen_range(level / 2..=level),
+					rng.gen_range(affix_level / 2..=affix_level),
 					rng.gen_range(0.0..1.0f32),
 				));
 				break;
@@ -1824,7 +1833,7 @@ pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut i
 			{
 				suffixes.push((
 					suffix,
-					rng.gen_range(level / 2..=level),
+					rng.gen_range(affix_level / 2..=affix_level),
 					rng.gen_range(0.0..1.0f32),
 				));
 				break;

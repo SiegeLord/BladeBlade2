@@ -1355,17 +1355,17 @@ fn spawn_enemy(
 		}
 		comps::Rarity::Rare =>
 		{
-			let num_affixes = if level > 10
+			let num_affixes = if level > 14
 			{
-				1
+				3
 			}
-			else if level > 5
+			else if level > 9
 			{
 				2
 			}
 			else
 			{
-				3
+				1
 			};
 
 			while affixes.len() < num_affixes
@@ -1621,7 +1621,11 @@ fn spawn_from_crystal(
 	{
 		let mut count = 3;
 
-		let weights = if level > 4
+		let weights = if level > 9
+		{
+			(2, 2, 1)
+		}
+		else if level > 4
 		{
 			(6, 2, 1)
 		}
