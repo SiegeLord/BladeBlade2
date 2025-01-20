@@ -254,6 +254,13 @@ fn real_main() -> Result<()>
 				display.show_cursor(false).ok();
 				state.track_mouse = true;
 			}
+			Event::JoystickConfiguration { .. } =>
+			{
+				state
+					.core
+					.reconfigure_joysticks()
+					.map_err(|_| "Couldn't reconfigure joysticks".to_string())?;
+			}
 			Event::TimerTick { .. } =>
 			{
 				if logics_without_draw > 10

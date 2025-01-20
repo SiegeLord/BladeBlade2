@@ -664,7 +664,10 @@ impl Controls
 			Action::BladeBlade,
 			[
 				Some(Input::Keyboard(allegro::KeyCode::Enter)),
-				Some(Input::JoystickPosAxis(allegro::JoystickStick::RightTrigger, 0)),
+				Some(Input::JoystickPosAxis(
+					allegro::JoystickStick::RightTrigger,
+					0,
+				)),
 			],
 		);
 		action_to_inputs.insert(

@@ -32,7 +32,7 @@
             "selectedLayer": 1,
             "viewCenter": {
                 "x": 1024,
-                "y": 704
+                "y": 1024
             }
         },
         "map_2.tmx": {
@@ -42,8 +42,8 @@
             "scale": 0.33,
             "selectedLayer": 1,
             "viewCenter": {
-                "x": 1048.4848484848483,
-                "y": 1757.5757575757575
+                "x": 1024.2424242424242,
+                "y": 1024.2424242424242
             }
         },
         "map_3.tmx": {
@@ -53,8 +53,8 @@
             "scale": 0.75,
             "selectedLayer": 1,
             "viewCenter": {
-                "x": 1164,
-                "y": 1308
+                "x": 1024,
+                "y": 1024
             }
         },
         "map_4.tmx": {
@@ -65,7 +65,7 @@
             "selectedLayer": 0,
             "viewCenter": {
                 "x": 1024,
-                "y": 904
+                "y": 1024
             }
         },
         "map_5.tmx": {
@@ -106,16 +106,16 @@
             "scale": 0.75,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 508,
-                "y": 738.6666666666665
+                "x": 512,
+                "y": 512
             }
         },
         "tree_1.tmx": {
             "scale": 0.5,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 496,
-                "y": 374
+                "x": 512,
+                "y": 512
             }
         }
     },

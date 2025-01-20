@@ -123,6 +123,11 @@ impl Game
 		state.cache_sprite("data/ring_fire.cfg")?;
 		state.cache_sprite("data/ring_cold.cfg")?;
 		state.cache_sprite("data/ring_lightning.cfg")?;
+		state.cache_sprite("data/ring_warmth.cfg")?;
+		state.cache_sprite("data/ring_dodge.cfg")?;
+		state.cache_sprite("data/ring_constrict.cfg")?;
+		state.cache_sprite("data/ring_leech.cfg")?;
+		state.cache_sprite("data/ring_armor.cfg")?;
 		state.cache_sprite("data/item.cfg")?;
 		state.cache_sprite("data/shocked.cfg")?;
 		state.cache_sprite("data/ignited.cfg")?;
@@ -603,6 +608,14 @@ impl InventoryScreen
 		//	Color::from_rgb_f(0., 0., 0.),
 		//);
 
+		let sign = if stats.values.life_regen > 0.
+		{
+			"+"
+		}
+		else
+		{
+			"-"
+		};
 		state.core.draw_text(
 			state.ui_font(),
 			Color::from_rgb_f(1., 1., 1.),
@@ -610,9 +623,10 @@ impl InventoryScreen
 			text_y,
 			FontAlign::Left,
 			&format!(
-				"Life: {} + {}/s",
+				"Life: {} {} {}/s",
 				stats.values.max_life as i32,
-				utils::nice_float(stats.values.life_regen, 0)
+				sign,
+				utils::nice_float(stats.values.life_regen.abs(), 0)
 			),
 		);
 		text_y += lh;
@@ -1717,7 +1731,7 @@ fn spawn_item(
 		comps::Jump::new(),
 		comps::Solid {
 			size: 8.,
-			mass: 1.,
+			mass: 0.,
 			kind: comps::CollisionKind::BigPlayer,
 		},
 		item,
@@ -1796,11 +1810,6 @@ fn spawn_fireball(
 		comps::OnContactEffect {
 			effects: vec![
 				comps::Effect::Die,
-				comps::Effect::SpawnExplosion(
-					sprites.hit.to_string(),
-					sprites.color,
-					sprites.sound,
-				),
 				comps::Effect::DoDamage(damage_stat_values, team),
 			],
 		},
@@ -2015,11 +2024,12 @@ struct Tiles
 	crystals: Vec<Point2<f32>>,
 	doodads: Vec<Point2<f32>>,
 	sprite: String,
+	level: i32,
 }
 
 impl Tiles
 {
-	fn new(filename: &str, sprite: &str) -> Result<Self>
+	fn new(filename: &str, sprite: &str, level: i32) -> Result<Self>
 	{
 		let map = tiled::Loader::new().load_tmx_map(&Path::new(&filename))?;
 
@@ -2142,6 +2152,7 @@ impl Tiles
 			platforms: resolved_platforms,
 			crystals: crystals,
 			doodads: doodads,
+			level: level,
 		})
 	}
 
@@ -2151,9 +2162,10 @@ impl Tiles
 	) -> Result<()>
 	{
 		let sprite = state.get_sprite(&self.sprite)?;
+		let palettes = sprite.get_palettes();
 		let palette_index = state
 			.palettes
-			.get_palette_index(&sprite.get_palettes()[0])?;
+			.get_palette_index(&palettes[(self.level as usize / 5) % palettes.len()])?;
 		for y in 0..self.height
 		{
 			for x in 0..self.width
@@ -2319,7 +2331,7 @@ impl Map
 	{
 		let mut world = hecs::World::new();
 
-		let tiles = Tiles::new(map_file, "data/terrain.cfg")?;
+		let tiles = Tiles::new(map_file, "data/terrain.cfg", level)?;
 		let bkg_tiles = Tiles::new(&format!("data/tree_{}.tmx", level % 2), "data/tree.cfg")?;
 
 		for (start, waypoints) in &tiles.platforms
@@ -3055,7 +3067,7 @@ impl Map
 				.world
 				.query_one_mut::<(&comps::Position, &mut comps::BladeBlade)>(id)
 			{
-				blade_blade.time_to_remove = state.time() + skill_duration as f64;
+				blade_blade.time_to_remove = state.time() + 2. * skill_duration as f64;
 				if blade_blade.num_blades < 10
 				{
 					state.sfx.play_positional_sound(
@@ -3551,18 +3563,10 @@ impl Map
 					let diff_z = pos.z - other_position.pos.z;
 					if diff_xy.norm() < r && diff_z.abs() < 16.
 					{
-						let damage_sprites = comps::damage_sprites(&values, comps::Rarity::Normal);
 						effects.push((
 							id,
 							Some(other_id),
-							vec![
-								comps::Effect::SpawnExplosion(
-									damage_sprites.hit.to_string(),
-									damage_sprites.color,
-									damage_sprites.sound,
-								),
-								comps::Effect::DoDamage(values, values.team),
-							],
+							vec![comps::Effect::DoDamage(values, values.team)],
 						));
 					}
 				}
@@ -3757,60 +3761,102 @@ impl Map
 					}
 					(comps::Effect::DoDamage(damage_stat_values, team), other_id) =>
 					{
-						let mut life_leech = 0.;
-						let mut mana_leech = 0.;
-						let mut explode_on_death = false;
-						let mut freeze_propagate_value = 0.;
-						let mut ignite_propagate_value = comps::EffectAndDuration::new();
-						let mut shock_propagate_value = comps::EffectAndDuration::new();
+						let mut damage_report = comps::DamageReport::miss();
 
 						if let Some(other_id) = other_id
 						{
+							let mut could_damage = false;
 							if let Ok(stats) =
 								self.world.query_one_mut::<&mut comps::Stats>(other_id)
 							{
 								if team.can_damage(stats.values.team)
 								{
-									let (
-										new_life_leech,
-										new_mana_leech,
-										new_explode_on_death,
-										new_freeze_propagate_value,
-										new_ignite_propagate_value,
-										new_shock_propagate_value,
-									) = stats.apply_damage(&damage_stat_values, state, &mut rng);
-									life_leech = new_life_leech;
-									mana_leech = new_mana_leech;
-									explode_on_death = new_explode_on_death;
-									freeze_propagate_value = new_freeze_propagate_value;
-									ignite_propagate_value = new_ignite_propagate_value;
-									shock_propagate_value = new_shock_propagate_value;
+									could_damage = true;
+									let new_damage_report =
+										stats.apply_damage(&damage_stat_values, state, &mut rng);
+									damage_report = new_damage_report;
+								}
+							}
+							// Doodads get a hit as well.
+							if damage_report.hit || !could_damage
+							{
+								let damage_sprites = comps::damage_sprites(
+									&damage_stat_values,
+									comps::Rarity::Normal,
+								);
+								let mut pos = None;
+								if could_damage
+								{
+									if let Ok(position) =
+										self.world.get::<&comps::Position>(other_id)
+									{
+										// HACK
+										pos =
+											Some(position.pos.clone() + Vector3::new(0., 0., 16.));
+									}
+								}
+								else
+								{
+									if let Ok(position) = self.world.get::<&comps::Position>(id)
+									{
+										pos = Some(position.pos.clone());
+									}
+								}
+
+								if let Some(pos) = pos
+								{
+									state.sfx.play_positional_sound(
+										damage_sprites.sound,
+										pos.xy(),
+										self.camera_pos.pos.xy(),
+										1.,
+									)?;
+									spawn_fns.push(Box::new(move |map| {
+										spawn_explosion(
+											pos,
+											&damage_sprites.hit,
+											Some(damage_sprites.color),
+											&mut map.world,
+										)
+									}));
 								}
 							}
 						}
 						if let Ok(stats) = self.world.query_one_mut::<&mut comps::Stats>(id)
 						{
-							if life_leech > 0.
+							if stats.values.instant_leech
 							{
-								let duration = 4. * stats.values.skill_duration;
-								stats.life_leech_instances.push(comps::RateInstance {
-									rate: life_leech / duration * DT,
-									time_to_remove: state.time() + duration as f64,
-								});
+								stats.life += damage_report.life_leech;
+								stats.mana += damage_report.mana_leech;
+								stats.life = utils::clamp(stats.life, 0., stats.values.max_life);
+								stats.mana = utils::clamp(stats.mana, 0., stats.values.max_mana);
 							}
-							if mana_leech > 0.
+							else
 							{
-								let duration = 4. * stats.values.skill_duration;
-								stats.mana_leech_instances.push(comps::RateInstance {
-									rate: mana_leech / duration * DT,
-									time_to_remove: state.time() + duration as f64,
-								});
+								if damage_report.life_leech > 0.
+								{
+									let duration = 4.;
+									stats.life_leech_instances.push(comps::RateInstance {
+										rate: damage_report.life_leech / duration * DT,
+										time_to_remove: state.time()
+											+ (duration * stats.values.skill_duration) as f64,
+									});
+								}
+								if damage_report.mana_leech > 0.
+								{
+									let duration = 4.;
+									stats.mana_leech_instances.push(comps::RateInstance {
+										rate: damage_report.mana_leech / duration * DT,
+										time_to_remove: state.time()
+											+ (duration * stats.values.skill_duration) as f64,
+									});
+								}
 							}
 						}
-						if explode_on_death
-							|| freeze_propagate_value > 0.
-							|| ignite_propagate_value.active()
-							|| shock_propagate_value.active()
+						if damage_report.explode_on_death
+							|| damage_report.freeze_propagation > 0.
+							|| damage_report.ignite_propagation.active()
+							|| damage_report.shock_propagation.active()
 						{
 							let mut center = None;
 							let mut values = None;
@@ -3828,7 +3874,7 @@ impl Map
 								if let Some(values) = values.as_mut()
 								{
 									values.physical_damage = 0.;
-									if explode_on_death
+									if damage_report.explode_on_death
 									{
 										values.physical_damage = 0.25
 											* stats.values.max_life * (1.
@@ -3837,9 +3883,11 @@ impl Map
 									values.cold_damage = 0.;
 									values.lightning_damage = 0.;
 									values.fire_damage = 0.;
-									values.freeze_propagate_value = freeze_propagate_value;
-									values.ignite_propagate_value = ignite_propagate_value;
-									values.shock_propagate_value = shock_propagate_value;
+									values.freeze_propagate_value =
+										damage_report.freeze_propagation;
+									values.ignite_propagate_value =
+										damage_report.ignite_propagation;
+									values.shock_propagate_value = damage_report.shock_propagation;
 									values.is_invincible = true;
 									values.cast_speed = 1.;
 								}

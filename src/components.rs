@@ -369,6 +369,17 @@ pub struct StatValues
 	pub ignite_propagate: bool,
 	pub shock_propagate: bool,
 
+	pub cannot_be_frozen: bool,
+	pub no_cold_damage: bool,
+	pub naked_dodge: bool,
+	pub fixed_resists: bool,
+	pub decaying: bool,
+	pub instant_leech: bool,
+	pub half_life: bool,
+	pub half_mana: bool,
+	pub armor_to_phys: bool,
+	pub no_elemental_damage: bool,
+
 	pub is_invincible: bool,
 }
 
@@ -422,6 +433,17 @@ impl Default for StatValues
 			ignite_propagate: false,
 			shock_propagate: false,
 
+			cannot_be_frozen: false,
+			no_cold_damage: false,
+			naked_dodge: false,
+			fixed_resists: false,
+			decaying: false,
+			instant_leech: false,
+			half_life: false,
+			half_mana: false,
+			armor_to_phys: false,
+			no_elemental_damage: false,
+
 			is_invincible: false,
 		}
 	}
@@ -460,6 +482,9 @@ impl StatValues
 			//chance_to_shock: 1.,
 			//cold_damage: 10.,
 			//chance_to_freeze: 1.,
+			//life_leech: 0.05,
+			//mana_leech: 0.05,
+			//armor: 10.,
 			..Self::default()
 		}
 	}
@@ -492,6 +517,8 @@ impl StatValues
 
 			physical_damage: (-7. + 0. * level as f32 + 10. * 1.1_f32.powf(level as f32)) * f,
 
+			//cold_damage: 5.,
+			//chance_to_freeze: 1.,
 			area_of_effect: 1.,
 			..Self::default()
 		}
@@ -573,6 +600,33 @@ impl EffectAndDuration
 	}
 }
 
+pub struct DamageReport
+{
+	pub hit: bool,
+	pub life_leech: f32,
+	pub mana_leech: f32,
+	pub explode_on_death: bool,
+	pub freeze_propagation: f32,
+	pub ignite_propagation: EffectAndDuration,
+	pub shock_propagation: EffectAndDuration,
+}
+
+impl DamageReport
+{
+	pub fn miss() -> Self
+	{
+		Self {
+			hit: false,
+			life_leech: 0.,
+			mana_leech: 0.,
+			explode_on_death: false,
+			freeze_propagation: 0.,
+			ignite_propagation: EffectAndDuration::new(),
+			shock_propagation: EffectAndDuration::new(),
+		}
+	}
+}
+
 #[derive(Debug, Clone)]
 pub struct Stats
 {
@@ -640,6 +694,22 @@ impl Stats
 					}
 				}
 			}
+			self.values.multishot |= adds.multishot;
+			self.values.explode_on_death |= adds.explode_on_death;
+			self.values.shock_propagate |= adds.shock_propagate;
+			self.values.ignite_propagate |= adds.ignite_propagate;
+			self.values.freeze_propagate |= adds.freeze_propagate;
+			self.values.cannot_be_frozen |= adds.cannot_be_frozen;
+			self.values.no_cold_damage |= adds.no_cold_damage;
+			self.values.naked_dodge |= adds.naked_dodge;
+			self.values.fixed_resists |= adds.fixed_resists;
+			self.values.decaying |= adds.decaying;
+			self.values.instant_leech |= adds.instant_leech;
+			self.values.half_mana |= adds.half_mana;
+			self.values.half_life |= adds.half_life;
+			self.values.armor_to_phys |= adds.armor_to_phys;
+			self.values.no_elemental_damage |= adds.no_elemental_damage;
+
 			self.values.speed = (self.base_values.speed + adds.speed) * (1. + increases.speed);
 			self.values.acceleration =
 				(self.base_values.acceleration + adds.acceleration) * (1. + increases.acceleration);
@@ -669,8 +739,18 @@ impl Stats
 				+ adds.critical_multiplier)
 				* (1. + increases.critical_multiplier);
 
-			self.values.physical_damage = (self.base_values.physical_damage + adds.physical_damage)
-				* (1. + increases.physical_damage);
+			let phys_bonus = if self.values.armor_to_phys
+			{
+				self.values.armor
+			}
+			else
+			{
+				0.
+			};
+
+			self.values.physical_damage =
+				(self.base_values.physical_damage + adds.physical_damage + phys_bonus)
+					* (1. + increases.physical_damage);
 			self.values.increased_physical_damage = increases.physical_damage;
 			self.values.cold_damage =
 				(self.base_values.cold_damage + adds.cold_damage) * (1. + increases.cold_damage);
@@ -704,11 +784,22 @@ impl Stats
 			self.values.chance_to_shock = (self.base_values.chance_to_shock + adds.chance_to_shock)
 				* (1. + increases.chance_to_shock);
 
-			self.values.multishot |= adds.multishot;
-			self.values.explode_on_death |= adds.explode_on_death;
-			self.values.shock_propagate |= adds.shock_propagate;
-			self.values.ignite_propagate |= adds.ignite_propagate;
-			self.values.freeze_propagate |= adds.freeze_propagate;
+			if self.values.no_cold_damage
+			{
+				self.values.cold_damage = 0.;
+			}
+
+			if self.values.no_elemental_damage
+			{
+				self.values.cold_damage = 0.;
+				self.values.fire_damage = 0.;
+				self.values.lightning_damage = 0.;
+			}
+
+			if self.values.decaying
+			{
+				self.values.life_regen -= self.values.max_life * 0.1;
+			}
 
 			self.values.critical_chance = utils::min(1., self.values.critical_chance);
 
@@ -719,6 +810,22 @@ impl Stats
 				utils::clamp(self.values.fire_resistance - penalty * 0.3, -1., 0.75);
 			self.values.lightning_resistance =
 				utils::clamp(self.values.lightning_resistance - penalty * 0.3, -1., 0.75);
+
+			if self.values.fixed_resists
+			{
+				self.values.cold_resistance = 0.7;
+				self.values.fire_resistance = 0.7;
+				self.values.lightning_resistance = 0.7;
+			}
+
+			if self.values.half_life
+			{
+				self.values.max_life *= 0.5;
+			}
+			if self.values.half_mana
+			{
+				self.values.max_mana *= 0.5;
+			}
 
 			self.values.chance_to_shock = utils::min(1., self.values.chance_to_shock);
 			self.values.chance_to_ignite = utils::min(1., self.values.chance_to_ignite);
@@ -753,18 +860,12 @@ impl Stats
 
 	pub fn apply_damage(
 		&mut self, values: &StatValues, state: &mut game_state::GameState, rng: &mut impl Rng,
-	) -> (f32, f32, bool, f32, EffectAndDuration, EffectAndDuration)
+	) -> DamageReport
 	{
-		if self.dead || self.values.is_invincible
+		let can_dodge = self.values.armor == 0. && self.values.naked_dodge;
+		if self.dead || self.values.is_invincible || (can_dodge && rng.gen_bool(0.5))
 		{
-			return (
-				0.,
-				0.,
-				false,
-				0.,
-				EffectAndDuration::new(),
-				EffectAndDuration::new(),
-			);
+			return DamageReport::miss();
 		}
 		let (crit, damage_mult) = if rng.gen_bool(values.critical_chance as f64)
 		{
@@ -804,7 +905,7 @@ impl Stats
 				* (1. - self.values.cold_resistance)
 				/ self.values.max_life;
 		}
-		if freeze_duration > 0.1
+		if freeze_duration > 0.1 && !self.values.cannot_be_frozen
 		{
 			self.freeze_time = state.time() + freeze_duration as f64;
 		}
@@ -899,14 +1000,15 @@ impl Stats
 		{
 			EffectAndDuration::new()
 		};
-		(
-			life_leech,
-			mana_leech,
-			explode_on_death,
-			freeze_propagation,
-			ignite_propagation,
-			shock_propagation,
-		)
+		DamageReport {
+			hit: true,
+			life_leech: life_leech,
+			mana_leech: mana_leech,
+			explode_on_death: explode_on_death,
+			freeze_propagation: freeze_propagation,
+			ignite_propagation: ignite_propagation,
+			shock_propagation: shock_propagation,
+		}
 	}
 
 	pub fn logic(&mut self, state: &mut game_state::GameState)
@@ -1187,6 +1289,16 @@ pub enum ItemPrefix
 	FreezePropagate,
 	IgnitePropagate,
 	ShockPropagate,
+	CannotBeFrozen,
+	NoColdDamage,
+	NakedDodge,
+	FixedResists,
+	Decaying,
+	InstantLeech,
+	HalfLife,
+	HalfMana,
+	ArmourToPhys,
+	NoElementalDamage,
 }
 
 impl ItemPrefix
@@ -1215,6 +1327,16 @@ impl ItemPrefix
 			ItemPrefix::FreezePropagate => "FreezePropagate",
 			ItemPrefix::IgnitePropagate => "IgnitePropagate",
 			ItemPrefix::ShockPropagate => "ShockPropagate",
+			ItemPrefix::CannotBeFrozen => "CannotBeFrozen",
+			ItemPrefix::NoColdDamage => "NoColdDamage",
+			ItemPrefix::NakedDodge => "NakedDodge",
+			ItemPrefix::FixedResists => "FixedResists",
+			ItemPrefix::Decaying => "Decaying",
+			ItemPrefix::InstantLeech => "InstantLeech",
+			ItemPrefix::HalfLife => "HalfLife",
+			ItemPrefix::HalfMana => "HalfMana",
+			ItemPrefix::ArmourToPhys => "ArmourToPhys",
+			ItemPrefix::NoElementalDamage => "NoElementalDamage",
 		}
 	}
 
@@ -1243,6 +1365,16 @@ impl ItemPrefix
 			ItemPrefix::FreezePropagate => (0.1, 0.01),
 			ItemPrefix::IgnitePropagate => (0.1, 0.01),
 			ItemPrefix::ShockPropagate => (0.1, 0.01),
+			ItemPrefix::CannotBeFrozen => (0.1, 0.01),
+			ItemPrefix::NoColdDamage => (0.1, 0.01),
+			ItemPrefix::NakedDodge => (0.1, 0.01),
+			ItemPrefix::FixedResists => (0.1, 0.01),
+			ItemPrefix::Decaying => (0.1, 0.01),
+			ItemPrefix::InstantLeech => (0.1, 0.01),
+			ItemPrefix::HalfLife => (0.1, 0.01),
+			ItemPrefix::HalfMana => (0.1, 0.01),
+			ItemPrefix::ArmourToPhys => (0.1, 0.01),
+			ItemPrefix::NoElementalDamage => (0.1, 0.01),
 		};
 		let start = delta * tier;
 		let end = delta * (tier + 1.);
@@ -1290,10 +1422,30 @@ impl ItemPrefix
 			ItemPrefix::FreezePropagate => "Freezes Spread",
 			ItemPrefix::IgnitePropagate => "Ignites Spread",
 			ItemPrefix::ShockPropagate => "Shocks Spread",
+			ItemPrefix::CannotBeFrozen => "Cannot Be Frozen",
+			ItemPrefix::NoColdDamage => "Cold Damage is 0",
+			ItemPrefix::NakedDodge => "Dodge when no Armour",
+			ItemPrefix::FixedResists => "Elem resists are 70%",
+			ItemPrefix::Decaying => "Lose 10% Life per Sec",
+			ItemPrefix::InstantLeech => "Leech Is Instant",
+			ItemPrefix::HalfLife => "50% Less Life",
+			ItemPrefix::HalfMana => "50% Less Mana",
+			ItemPrefix::ArmourToPhys => "Armoured Blades",
+			ItemPrefix::NoElementalDamage => "Elemental Damage is 0",
 		};
 		let unique = match self
 		{
-			ItemPrefix::ExplodeOnDeath
+			ItemPrefix::CannotBeFrozen
+			| ItemPrefix::NoColdDamage
+			| ItemPrefix::NakedDodge
+			| ItemPrefix::FixedResists
+			| ItemPrefix::Decaying
+			| ItemPrefix::InstantLeech
+			| ItemPrefix::HalfLife
+			| ItemPrefix::HalfMana
+			| ItemPrefix::ArmourToPhys
+			| ItemPrefix::NoElementalDamage
+			| ItemPrefix::ExplodeOnDeath
 			| ItemPrefix::FreezePropagate
 			| ItemPrefix::ShockPropagate
 			| ItemPrefix::IgnitePropagate => true,
@@ -1395,6 +1547,46 @@ impl ItemPrefix
 			ItemPrefix::ShockPropagate =>
 			{
 				adds.shock_propagate = true;
+			}
+			ItemPrefix::CannotBeFrozen =>
+			{
+				adds.cannot_be_frozen = true;
+			}
+			ItemPrefix::NoColdDamage =>
+			{
+				adds.no_cold_damage = true;
+			}
+			ItemPrefix::NakedDodge =>
+			{
+				adds.naked_dodge = true;
+			}
+			ItemPrefix::FixedResists =>
+			{
+				adds.fixed_resists = true;
+			}
+			ItemPrefix::Decaying =>
+			{
+				adds.decaying = true;
+			}
+			ItemPrefix::InstantLeech =>
+			{
+				adds.instant_leech = true;
+			}
+			ItemPrefix::HalfLife =>
+			{
+				adds.half_life = true;
+			}
+			ItemPrefix::HalfMana =>
+			{
+				adds.half_mana = true;
+			}
+			ItemPrefix::ArmourToPhys =>
+			{
+				adds.armor_to_phys = true;
+			}
+			ItemPrefix::NoElementalDamage =>
+			{
+				adds.no_elemental_damage = true;
 			}
 		}
 	}
@@ -1597,46 +1789,121 @@ impl Inventory
 
 pub fn generate_unique(rng: &mut impl Rng) -> Item
 {
-	match rng.gen_range(0..4)
-	{
-		1 => Item {
-			name: vec!["Polaris".to_string()],
-			appearance: Appearance::new("data/ring_cold.cfg"),
-			rarity: Rarity::Unique,
-			prefixes: vec![
-				(ItemPrefix::FreezePropagate, 1, 0.),
-				(ItemPrefix::ChanceToFreeze, 25, 0.),
-			],
-			suffixes: vec![],
-		},
-		2 => Item {
-			name: vec!["Rageheart".to_string()],
-			appearance: Appearance::new("data/ring_fire.cfg"),
-			rarity: Rarity::Unique,
-			prefixes: vec![
-				(ItemPrefix::IgnitePropagate, 1, 0.),
-				(ItemPrefix::ChanceToIgnite, 25, 0.),
-			],
-			suffixes: vec![],
-		},
-		3 => Item {
-			name: vec!["Tesla Coil".to_string()],
-			appearance: Appearance::new("data/ring_lightning.cfg"),
-			rarity: Rarity::Unique,
-			prefixes: vec![
-				(ItemPrefix::ShockPropagate, 1, 0.),
-				(ItemPrefix::ChanceToShock, 25, 0.),
-			],
-			suffixes: vec![],
-		},
-		_ => Item {
-			name: vec!["Uncontrollable".to_string(), "Hate".to_string()],
-			appearance: Appearance::new("data/ring_explode.cfg"),
-			rarity: Rarity::Unique,
-			prefixes: vec![(ItemPrefix::ExplodeOnDeath, 1, 0.)],
-			suffixes: vec![],
-		},
-	}
+	let item_weight: [(Box<dyn Fn() -> Item>, i32); 9] = [
+		(
+			Box::new(|| Item {
+				name: vec!["Polaris".to_string()],
+				appearance: Appearance::new("data/ring_cold.cfg"),
+				rarity: Rarity::Unique,
+				prefixes: vec![
+					(ItemPrefix::FreezePropagate, 1, 0.),
+					(ItemPrefix::ChanceToFreeze, 25, 0.),
+				],
+				suffixes: vec![],
+			}),
+			10,
+		),
+		(
+			Box::new(|| Item {
+				name: vec!["Rageheart".to_string()],
+				appearance: Appearance::new("data/ring_fire.cfg"),
+				rarity: Rarity::Unique,
+				prefixes: vec![
+					(ItemPrefix::IgnitePropagate, 1, 0.),
+					(ItemPrefix::ChanceToIgnite, 25, 0.),
+				],
+				suffixes: vec![],
+			}),
+			20,
+		),
+		(
+			Box::new(|| Item {
+				name: vec!["Tesla Coil".to_string()],
+				appearance: Appearance::new("data/ring_lightning.cfg"),
+				rarity: Rarity::Unique,
+				prefixes: vec![
+					(ItemPrefix::ShockPropagate, 1, 0.),
+					(ItemPrefix::ChanceToShock, 25, 0.),
+				],
+				suffixes: vec![],
+			}),
+			20,
+		),
+		(
+			Box::new(|| Item {
+				name: vec!["Uncontrollable".to_string(), "Hate".to_string()],
+				appearance: Appearance::new("data/ring_explode.cfg"),
+				rarity: Rarity::Unique,
+				prefixes: vec![(ItemPrefix::ExplodeOnDeath, 1, 0.)],
+				suffixes: vec![],
+			}),
+			15,
+		),
+		(
+			Box::new(|| Item {
+				name: vec!["Exile's".to_string(), "Warm Memories".to_string()],
+				appearance: Appearance::new("data/ring_warmth.cfg"),
+				rarity: Rarity::Unique,
+				prefixes: vec![
+					(ItemPrefix::CannotBeFrozen, 1, 0.),
+					(ItemPrefix::NoColdDamage, 1, 0.),
+				],
+				suffixes: vec![],
+			}),
+			20,
+		),
+		(
+			Box::new(|| Item {
+				name: vec!["Vulnerable Grace".to_string()],
+				appearance: Appearance::new("data/ring_dodge.cfg"),
+				rarity: Rarity::Unique,
+				prefixes: vec![(ItemPrefix::NakedDodge, 1, 0.)],
+				suffixes: vec![],
+			}),
+			20,
+		),
+		(
+			Box::new(|| Item {
+				name: vec!["Ethereal Tear".to_string()],
+				appearance: Appearance::new("data/ring_constrict.cfg"),
+				rarity: Rarity::Unique,
+				prefixes: vec![
+					(ItemPrefix::FixedResists, 1, 0.),
+					(ItemPrefix::Decaying, 1, 0.),
+				],
+				suffixes: vec![],
+			}),
+			20,
+		),
+		(
+			Box::new(|| Item {
+				name: vec!["Whale Pact".to_string()],
+				appearance: Appearance::new("data/ring_leech.cfg"),
+				rarity: Rarity::Unique,
+				prefixes: vec![
+					(ItemPrefix::InstantLeech, 1, 0.),
+					(ItemPrefix::HalfLife, 1, 0.),
+					(ItemPrefix::HalfMana, 1, 0.),
+				],
+				suffixes: vec![],
+			}),
+			10,
+		),
+		(
+			Box::new(|| Item {
+				name: vec!["Final".to_string(), "Blasphemy".to_string()],
+				appearance: Appearance::new("data/ring_armor.cfg"),
+				rarity: Rarity::Unique,
+				prefixes: vec![
+					(ItemPrefix::ArmourToPhys, 1, 0.),
+					(ItemPrefix::NoElementalDamage, 1, 0.),
+				],
+				suffixes: vec![],
+			}),
+			20,
+		),
+	];
+	item_weight.choose_weighted(rng, |&(_, w)| w).unwrap().0()
 }
 
 pub fn generate_item(kind: ItemKind, crystal_level: i32, level: i32, rng: &mut impl Rng) -> Item
