@@ -1598,6 +1598,7 @@ fn spawn_crystal(
 			mass: std::f32::INFINITY,
 			kind: comps::CollisionKind::World,
 		},
+		comps::CastsShadow,
 		comps::Crystal::new(kind),
 		comps::OnDeathEffect {
 			effects: vec![

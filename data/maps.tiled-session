@@ -3,7 +3,7 @@
         "height": 4300,
         "width": 2
     },
-    "activeFile": "map_3.tmx",
+    "activeFile": "tree.tmx",
     "expandedProjectPaths": [
         "."
     ],
@@ -42,19 +42,19 @@
             "scale": 1,
             "selectedLayer": 1,
             "viewCenter": {
-                "x": 1060,
-                "y": 1310
+                "x": 1024,
+                "y": 1024
             }
         },
         "map_3.tmx": {
             "expandedObjectLayers": [
                 2
             ],
-            "scale": 2,
+            "scale": 0.75,
             "selectedLayer": 1,
             "viewCenter": {
-                "x": 1135.5,
-                "y": 824
+                "x": 1164,
+                "y": 1308
             }
         },
         "map_4.tmx": {
@@ -64,8 +64,8 @@
             "scale": 1,
             "selectedLayer": 1,
             "viewCenter": {
-                "x": 880,
-                "y": 354
+                "x": 1024,
+                "y": 1024
             }
         },
         "test.tmx": {
@@ -116,13 +116,13 @@
     "recentFiles": [
         "Terrain.tsx",
         "tree.tsx",
-        "tree.tmx",
-        "test.tmx",
-        "map_0.tmx",
-        "map_1.tmx",
-        "map_2.tmx",
         "map_4.tmx",
-        "map_3.tmx"
+        "map_3.tmx",
+        "map_2.tmx",
+        "map_1.tmx",
+        "map_0.tmx",
+        "test.tmx",
+        "tree.tmx"
     ],
     "tileset.embedInMap": false,
     "tileset.lastUsedFormat": "tsx",

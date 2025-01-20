@@ -1,3 +1,35 @@
+1.0 tasks:
+    Draw
+        New crystals - done
+        New uniques - done
+
+    New map
+    New tree map
+
+    Misc
+
+    Different palettes for map levels
+    More diffuculty scaling
+    Nerf cold a little bit
+
+    Uniques:
+        A:
+            Cannot be frozen
+            Cannot freeze
+        B:
+            Avoid damage 50% of the time when no armor
+        C:
+            Resistances are 70%
+            Lose 10% life/sec
+        D:
+            25% leech is instant
+            50% less life
+            50% less mana
+        E:
+            Armor adds to physical damage
+            Deal no elemental damage
+
+
 Audio:
 
 Player Dead - done
