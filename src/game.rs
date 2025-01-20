@@ -2323,7 +2323,7 @@ impl Map
 		let mut world = hecs::World::new();
 
 		let tiles = Tiles::new(map_file, "data/terrain.cfg")?;
-		let bkg_tiles = Tiles::new("data/tree.tmx", "data/tree.cfg")?;
+		let bkg_tiles = Tiles::new(&format!("data/tree_{}.tmx", level % 2), "data/tree.cfg")?;
 
 		for (start, waypoints) in &tiles.platforms
 		{
