@@ -11,15 +11,18 @@ use allegro_audio::*;
 use rand::prelude::*;
 
 const MAX_INSTANCES: usize = 10;
+const FADEOUT_TIME: f64 = 0.1;
 
 pub struct Sfx
 {
 	audio: AudioAddon,
 	acodec: AcodecAddon,
 	sink: Sink,
-	stream: Option<AudioStream>,
-	music_file: String,
-	music_volume_factor: f32,
+	music_stream: Option<AudioStream>,
+	music: (String, f32),
+	next_music: Option<(String, f32)>,
+	time_to_next_music: f64,
+	music_fade_factor: f32,
 	sample_instances: HashMap<String, Vec<SampleInstance>>,
 	exclusive_sounds: Vec<String>,
 	exclusive_instance: Option<SampleInstance>,
@@ -44,23 +47,19 @@ impl Sfx
 			acodec: acodec,
 			sink: sink,
 			sample_instances: HashMap::new(),
-			stream: None,
+			music_stream: None,
 			exclusive_instance: None,
 			exclusive_sounds: vec![],
 			samples: HashMap::new(),
-			music_file: "".into(),
-			music_volume_factor: 1.0,
+			music: ("".into(), 1.0),
+			time_to_next_music: 0.,
+			music_fade_factor: 1.0,
+			next_music: None,
 		};
 		sfx.set_sfx_volume(sfx_volume);
 		sfx.set_music_volume(music_volume);
 
 		Ok(sfx)
-	}
-
-	pub fn set_music_file(&mut self, music: &str, music_volume_factor: f32)
-	{
-		self.music_file = music.to_string();
-		self.music_volume_factor = music_volume_factor;
 	}
 
 	pub fn cache_sample<'l>(&'l mut self, name: &str) -> Result<&'l Sample>
@@ -77,17 +76,31 @@ impl Sfx
 		self.samples.get(name)
 	}
 
-	pub fn update_sounds(&mut self) -> Result<()>
+	pub fn update_sounds(&mut self, core: &Core) -> Result<()>
 	{
 		for instances in self.sample_instances.values_mut()
 		{
 			instances.retain(|s| s.get_playing().unwrap());
 		}
-		if let Some(ref stream) = self.stream
+		if self.next_music.is_some()
+		{
+			if core.get_time() > self.time_to_next_music
+			{
+				self.music = self.next_music.take().unwrap();
+				self.start_music()?;
+			}
+			else
+			{
+				self.music_fade_factor =
+					((self.time_to_next_music - core.get_time()) / FADEOUT_TIME) as f32;
+				self.set_music_volume(self.music_volume);
+			}
+		}
+		if let Some(ref stream) = self.music_stream
 		{
 			if !stream.get_playing()
 			{
-				self.play_music()?
+				self.start_music()?;
 			}
 		}
 
@@ -227,30 +240,50 @@ impl Sfx
 		Ok(())
 	}
 
-	pub fn play_music(&mut self) -> Result<()>
+	pub fn play_music(&mut self, music: &str, music_volume_factor: f32, core: &Core)
 	{
-		let mut new_stream = AudioStream::load(&self.audio, &self.music_file)
-			.map_err(|_| format!("Couldn't load {}", self.music_file))?;
+		self.next_music = Some((music.to_string(), music_volume_factor));
+		self.time_to_next_music = core.get_time() + FADEOUT_TIME;
+	}
+
+	fn start_music(&mut self) -> Result<()>
+	{
+		let mut new_stream = AudioStream::load(&self.audio, &self.music.0)
+			.map_err(|_| format!("Couldn't load {}", self.music.0))?;
 		new_stream.attach(&mut self.sink).unwrap();
 		new_stream.set_playmode(Playmode::Loop).unwrap();
 		new_stream
-			.set_gain(self.music_volume * self.music_volume_factor)
+			.set_gain(self.music_volume * self.music.1)
 			.unwrap();
-		self.stream = Some(new_stream);
+		self.music_stream = Some(new_stream);
 		Ok(())
 	}
 
 	pub fn set_music_volume(&mut self, new_volume: f32)
 	{
 		self.music_volume = new_volume;
-		if let Some(stream) = self.stream.as_mut()
+		if let Some(stream) = self.music_stream.as_mut()
 		{
-			stream.set_gain(self.music_volume).unwrap();
+			stream
+				.set_gain(self.music_volume * self.music.1 * self.music_fade_factor)
+				.unwrap();
 		}
 	}
 
 	pub fn set_sfx_volume(&mut self, new_volume: f32)
 	{
 		self.sfx_volume = new_volume;
+	}
+
+	pub fn fade_out(&mut self, core: &Core)
+	{
+		let mut t = 0.;
+		let dt = 0.01;
+		while t < FADEOUT_TIME
+		{
+			self.sink.set_gain((1. - t / FADEOUT_TIME) as f32).unwrap();
+			core.rest(dt);
+			t += dt;
+		}
 	}
 }

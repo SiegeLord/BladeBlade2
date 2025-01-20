@@ -26,8 +26,7 @@ impl Menu
 		state.sfx.cache_sample("data/ui1.ogg")?;
 		state.sfx.cache_sample("data/ui2.ogg")?;
 		state.cache_sprite("data/logo.cfg")?;
-		state.sfx.set_music_file("data/title.ogg", 1.);
-		state.sfx.play_music()?;
+		state.sfx.play_music("data/title.ogg", 1., &state.core);
 
 		let subscreens = ui::SubScreens::new(state);
 

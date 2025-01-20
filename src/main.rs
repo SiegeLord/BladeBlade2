@@ -284,7 +284,7 @@ fn real_main() -> Result<()>
 				}
 
 				logics_without_draw += 1;
-				state.sfx.update_sounds()?;
+				state.sfx.update_sounds(&state.core)?;
 
 				if !state.paused
 				{
@@ -315,9 +315,7 @@ fn real_main() -> Result<()>
 			}
 		}
 	}
-	// To avoid clicks for the final sound.
-	state.core.rest(0.25);
-
+	state.sfx.fade_out(&state.core);
 	Ok(())
 }
 

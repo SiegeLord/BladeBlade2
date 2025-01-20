@@ -81,8 +81,7 @@ impl Game
 	pub fn new(resume: bool, state: &mut game_state::GameState) -> Result<Self>
 	{
 		state.controls.clear_action_states();
-		state.sfx.set_music_file("data/game.ogg", 0.5);
-		state.sfx.play_music()?;
+		state.sfx.play_music("data/game.ogg", 0.5, &state.core);
 		//dbg!(100. * comps::ItemPrefix::ManaRegen.get_value(24, 0.15291262));
 		//return Err("Foo".to_string().into());
 		state.cache_bitmap("data/circle.png")?;
