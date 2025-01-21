@@ -88,6 +88,7 @@ impl Sfx
 			{
 				self.music = self.next_music.take().unwrap();
 				self.start_music()?;
+				self.music_fade_factor = 1.;
 			}
 			else
 			{

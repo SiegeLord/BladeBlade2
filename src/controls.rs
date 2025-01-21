@@ -629,28 +629,28 @@ impl Controls
 			Action::MoveUp,
 			[
 				Some(Input::Keyboard(allegro::KeyCode::W)),
-				Some(Input::JoystickNegAxis(allegro::JoystickStick::DPad, 1)),
+				Some(Input::JoystickNegAxis(allegro::JoystickStick::LeftThumb, 1)),
 			],
 		);
 		action_to_inputs.insert(
 			Action::MoveLeft,
 			[
 				Some(Input::Keyboard(allegro::KeyCode::A)),
-				Some(Input::JoystickNegAxis(allegro::JoystickStick::DPad, 0)),
+				Some(Input::JoystickNegAxis(allegro::JoystickStick::LeftThumb, 0)),
 			],
 		);
 		action_to_inputs.insert(
 			Action::MoveRight,
 			[
 				Some(Input::Keyboard(allegro::KeyCode::D)),
-				Some(Input::JoystickPosAxis(allegro::JoystickStick::DPad, 0)),
+				Some(Input::JoystickPosAxis(allegro::JoystickStick::LeftThumb, 0)),
 			],
 		);
 		action_to_inputs.insert(
 			Action::MoveDown,
 			[
 				Some(Input::Keyboard(allegro::KeyCode::S)),
-				Some(Input::JoystickPosAxis(allegro::JoystickStick::DPad, 1)),
+				Some(Input::JoystickPosAxis(allegro::JoystickStick::LeftThumb, 1)),
 			],
 		);
 		action_to_inputs.insert(
@@ -911,7 +911,8 @@ impl ControlsHandler
 				axis, stick, pos, ..
 			} =>
 			{
-				if *pos > 0.1
+				let dead = 0.25;
+				if *pos > dead
 				{
 					if let Some(state) = self
 						.input_state
@@ -926,7 +927,7 @@ impl ControlsHandler
 						state.push(0.);
 					}
 				}
-				else if *pos < -0.1
+				else if *pos < -dead
 				{
 					if let Some(state) = self
 						.input_state
